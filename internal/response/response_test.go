@@ -32,7 +32,8 @@ func TestRespondWithError(t *testing.T) {
 	var errResp response.ErrorResponse
 	err := json.Unmarshal(w.Body.Bytes(), &errResp)
 	require.NoError(t, err, "Не удалось распарсить JSON ответа")
-	assert.Equal(t, message, errResp.Error, "Неверное сообщение об ошибке в JSON")
+	assert.Equal(t, code, errResp.Code, "Неверный код в теле ответа JSON")
+	assert.Equal(t, message, errResp.Message, "Неверное сообщение об ошибке в JSON")
 }
 
 // TestRespondWithJSON проверяет функцию RespondWithJSON.
@@ -72,9 +73,6 @@ func TestRespondWithJSON_MarshalError(t *testing.T) {
 	// Ожидаем Internal Server Error
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "Ожидался статус 500 при ошибке маршалинга")
 
-	// Проверяем тело ответа (должно быть стандартное сообщение об ошибке)
-	var errResp response.ErrorResponse
-	err := json.Unmarshal(w.Body.Bytes(), &errResp)
-	require.NoError(t, err, "Не удалось распарсить JSON ответа об ошибке")
-	assert.Equal(t, "Internal Server Error", errResp.Error, "Неверное сообщение при ошибке маршалинга")
+	// Проверяем тело ответа (должно быть текстовое "Internal Server Error")
+	assert.Equal(t, "Internal Server Error", w.Body.String(), "Неверное сообщение при ошибке маршалинга")
 }

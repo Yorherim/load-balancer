@@ -7,33 +7,41 @@ import (
 	"net/http"
 )
 
-// ErrorResponse структура для возврата ошибок в формате JSON.
+// ErrorResponse представляет стандартный формат ответа для ошибок API.
+// Изменено поле Error на Message и добавлено поле Code.
 type ErrorResponse struct {
-	Error string `json:"error"`
+	Code    int    `json:"code"`    // HTTP статус код
+	Message string `json:"message"` // Сообщение об ошибке
 }
 
 // RespondWithError отправляет JSON-ответ с ошибкой.
-func RespondWithError(w http.ResponseWriter, code int, message string) {
-	log.Printf("[Error] Status: %d, Message: %s", code, message)
-	RespondWithJSON(w, code, ErrorResponse{Error: message})
+func RespondWithError(w http.ResponseWriter, statusCode int, message string) {
+	// Логируем ошибку перед отправкой ответа
+	log.Printf("[Error] Status: %d, Message: %s", statusCode, message)
+	responsePayload := ErrorResponse{
+		Code:    statusCode,
+		Message: message,
+	}
+	RespondWithJSON(w, statusCode, responsePayload)
 }
 
-// RespondWithJSON отправляет JSON-ответ с указанным кодом и данными.
-func RespondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+// RespondWithJSON отправляет JSON-ответ с указанным статус-кодом и телом.
+// Используется как для успешных ответов, так и внутри RespondWithError.
+func RespondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
 	response, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[Response Error] Ошибка маршалинга JSON: %v", err)
-		// Отправляем базовую ошибку сервера, если не можем сформировать JSON
-		w.Header().Set("Content-Type", "application/json") // Все равно пытаемся установить заголовок
+		// В случае ошибки маршалинга, отправляем текстовую ошибку 500
+		log.Printf("[Error] Ошибка маршалинга JSON-ответа: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"Internal Server Error"}`)) // Захардкоженный JSON
+		w.Write([]byte("Internal Server Error")) // Пишем как []byte
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
+	w.WriteHeader(statusCode)
 	_, err = w.Write(response)
 	if err != nil {
-		log.Printf("[Response Error] Ошибка записи JSON ответа: %v", err)
+		// Логируем ошибку записи ответа, но статус уже отправлен
+		log.Printf("[Error] Ошибка записи JSON-ответа клиенту: %v", err)
 	}
 }

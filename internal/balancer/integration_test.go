@@ -259,7 +259,8 @@ func TestIntegration_RateLimiting(t *testing.T) {
 	var errResp3 response.ErrorResponse
 	err := json.Unmarshal([]byte(body), &errResp3)
 	require.NoError(t, err, "Не удалось распарсить JSON ошибки 429: %s", body)
-	assert.Equal(t, "Rate limit exceeded", errResp3.Error)
+	assert.Equal(t, http.StatusTooManyRequests, errResp3.Code, "Incorrect error code in body 3")
+	assert.Contains(t, errResp3.Message, "Rate limit exceeded", "Incorrect error message in body 3")
 	// --------------------
 
 	// 3. Ждем > 1 сек, чтобы токены пополнились (тикер работает)
@@ -303,7 +304,8 @@ func TestIntegration_UnhealthyBackend(t *testing.T) {
 			var errResp response.ErrorResponse
 			err := json.Unmarshal([]byte(body), &errResp)
 			require.NoError(t, err, "Не удалось распарсить JSON ошибки 502: %s", body)
-			assert.Contains(t, errResp.Error, "Bad Gateway", "Текст ошибки в JSON не содержит 'Bad Gateway'")
+			assert.Equal(t, http.StatusBadGateway, errResp.Code, "Incorrect code in Bad Gateway body")
+			assert.Contains(t, errResp.Message, "Bad Gateway from Custom Handler", "Incorrect message in Bad Gateway body")
 			firstResponse502 = true
 			continue // Пропускаем проверку тела
 		}
@@ -348,7 +350,8 @@ func TestIntegration_AllBackendsUnhealthy(t *testing.T) {
 	var errResp response.ErrorResponse
 	err := json.Unmarshal([]byte(body), &errResp)
 	require.NoError(t, err, "Не удалось распарсить JSON ошибки 503: %s", body)
-	assert.Contains(t, errResp.Error, "All backend servers are unavailable", "Текст ошибки 503 не совпадает")
+	assert.Equal(t, http.StatusServiceUnavailable, errResp.Code, "Incorrect code in 503 error body")
+	assert.Contains(t, errResp.Message, "All backend servers are unavailable", "Incorrect message in 503 error body")
 }
 
 // TestIntegration_HealthChecks проверяет работу Health Checks.
@@ -533,6 +536,7 @@ func TestIntegration_Random_AllBackendsUnhealthy(t *testing.T) {
 	var errResp response.ErrorResponse
 	err := json.Unmarshal([]byte(body), &errResp)
 	require.NoError(t, err, "Не удалось распарсить JSON ошибки 503 (random): %s", body)
-	assert.Equal(t, "All backend servers are unavailable", errResp.Error)
+	assert.Equal(t, http.StatusServiceUnavailable, errResp.Code, "Incorrect code in 503 error body")
+	assert.Contains(t, errResp.Message, "All backend servers are unavailable", "Incorrect message in 503 error body")
 	// --------------------
 }

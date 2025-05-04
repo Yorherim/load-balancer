@@ -21,17 +21,19 @@ type ClientLimitStore interface {
 }
 
 // ClientLimitRequest структура для тела запроса при создании/обновлении лимита.
-// Использует тип ClientRateConfig из пакета config.
+// Использует плоскую структуру согласно заданию.
 type ClientLimitRequest struct {
-	ClientID string                  `json:"client_id"`
-	Limit    config.ClientRateConfig `json:"limit"` // Используем переименованный тип
+	ClientID string  `json:"client_id"`
+	Rate     float64 `json:"rate_per_sec"` // Изменяем JSON-тег
+	Capacity float64 `json:"capacity"`
 }
 
-// ClientLimitResponse структура для ответа при получении лимита.
-// Также использует ClientRateConfig.
+// ClientLimitResponse структура для ответа при получении/создании/обновлении лимита.
+// Использует плоскую структуру.
 type ClientLimitResponse struct {
-	ClientID string                  `json:"client_id"`
-	Limit    config.ClientRateConfig `json:"limit"` // Используем переименованный тип
+	ClientID string  `json:"client_id"`
+	Rate     float64 `json:"rate_per_sec"`
+	Capacity float64 `json:"capacity"`
 }
 
 // APIHandler обрабатывает HTTP-запросы к API.
@@ -103,12 +105,19 @@ func (h *APIHandler) createClient(w http.ResponseWriter, r *http.Request) {
 		response.RespondWithError(w, http.StatusBadRequest, "Поле client_id обязательно")
 		return
 	}
-	if req.Limit.Rate <= 0 || req.Limit.Capacity <= 0 {
+	// Используем req.Rate и req.Capacity напрямую
+	if req.Rate <= 0 || req.Capacity <= 0 {
 		response.RespondWithError(w, http.StatusBadRequest, "Значения rate и capacity должны быть положительными")
 		return
 	}
 
-	err := h.Store.CreateClientLimit(req.ClientID, req.Limit) // Передаем req.Limit (типа ClientRateConfig)
+	// Создаем структуру ClientRateConfig для передачи в Store
+	limitConfig := config.ClientRateConfig{
+		Rate:     req.Rate,
+		Capacity: req.Capacity,
+	}
+
+	err := h.Store.CreateClientLimit(req.ClientID, limitConfig)
 	if err != nil {
 		// Проверяем, является ли ошибка конфликтом (уже существует)
 		if strings.Contains(err.Error(), "уже существует") { // TODO: Более надежная проверка ошибки
@@ -119,7 +128,13 @@ func (h *APIHandler) createClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response.RespondWithJSON(w, http.StatusCreated, req) // Возвращаем созданный объект
+	// Возвращаем созданный объект (используем ClientLimitResponse для ответа)
+	resp := ClientLimitResponse{
+		ClientID: req.ClientID,
+		Rate:     req.Rate,
+		Capacity: req.Capacity,
+	}
+	response.RespondWithJSON(w, http.StatusCreated, resp)
 }
 
 // getClient обрабатывает GET /clients/{clientID}
@@ -137,17 +152,15 @@ func (h *APIHandler) getClient(w http.ResponseWriter, r *http.Request, clientID 
 
 	resp := ClientLimitResponse{
 		ClientID: clientID,
-		Limit: config.ClientRateConfig{
-			Rate:     rate,
-			Capacity: capacity,
-		},
+		Rate:     rate,
+		Capacity: capacity,
 	}
 	response.RespondWithJSON(w, http.StatusOK, resp)
 }
 
 // updateClient обрабатывает PUT /clients/{clientID}
 func (h *APIHandler) updateClient(w http.ResponseWriter, r *http.Request, clientID string) {
-	var req ClientLimitRequest
+	var req ClientLimitRequest // Ожидаем плоскую структуру
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Ошибка парсинга JSON: %v", err))
 		return
@@ -158,12 +171,19 @@ func (h *APIHandler) updateClient(w http.ResponseWriter, r *http.Request, client
 		response.RespondWithError(w, http.StatusBadRequest, "client_id в теле запроса не совпадает с ID в пути")
 		return
 	}
-	if req.Limit.Rate <= 0 || req.Limit.Capacity <= 0 {
+	// Используем req.Rate и req.Capacity напрямую
+	if req.Rate <= 0 || req.Capacity <= 0 {
 		response.RespondWithError(w, http.StatusBadRequest, "Значения rate и capacity должны быть положительными")
 		return
 	}
 
-	err := h.Store.UpdateClientLimit(clientID, req.Limit) // Передаем req.Limit (типа ClientRateConfig)
+	// Создаем структуру ClientRateConfig для передачи в Store
+	limitConfig := config.ClientRateConfig{
+		Rate:     req.Rate,
+		Capacity: req.Capacity,
+	}
+
+	err := h.Store.UpdateClientLimit(clientID, limitConfig)
 	if err != nil {
 		if strings.Contains(err.Error(), "не найден для обновления") { // TODO: Более надежная проверка ошибки
 			response.RespondWithError(w, http.StatusNotFound, err.Error())
@@ -173,10 +193,11 @@ func (h *APIHandler) updateClient(w http.ResponseWriter, r *http.Request, client
 		return
 	}
 
-	// Формируем ответ с обновленными данными
+	// Формируем ответ с обновленными данными (используем ClientLimitResponse)
 	resp := ClientLimitResponse{
 		ClientID: clientID,
-		Limit:    req.Limit,
+		Rate:     req.Rate,
+		Capacity: req.Capacity,
 	}
 	response.RespondWithJSON(w, http.StatusOK, resp)
 }

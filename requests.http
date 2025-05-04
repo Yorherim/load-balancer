@@ -42,10 +42,8 @@ Content-Type: application/json
 
 {
   "client_id": "{{apiClientId}}",
-  "limit": {
-    "rate": {{initialRate}},
-    "capacity": {{initialCapacity}}
-  }
+  "rate_per_sec": {{initialRate}},
+  "capacity": {{initialCapacity}}
 }
 
 ###
@@ -57,38 +55,33 @@ Content-Type: application/json
 
 {
   "client_id": "{{apiClientId}}",
-  "limit": {
-    "rate": 1,
-    "capacity": 1
-  }
+  "rate_per_sec": 1,
+  "capacity": 1
 }
 
 ###
 
 # 8. Создание лимита - Некорректный JSON
 # Ожидается 400 Bad Request
-POST {{baseUrl}}/clients/
+POST {{baseUrl}}/clients
 Content-Type: application/json
 
 {
   "client_id": "bad-json",
-  "limit": {
-    "rate": 1
-  } // Отсутствует закрывающая скобка
+  "rate_per_sec": 1
+}
 
 ###
 
 # 9. Создание лимита - Некорректные значения
 # Ожидается 400 Bad Request
-POST {{baseUrl}}/clients/
+POST {{baseUrl}}/clients
 Content-Type: application/json
 
 {
   "client_id": "bad-values",
-  "limit": {
-    "rate": -5,
-    "capacity": 0
-  }
+  "rate_per_sec": -5,
+  "capacity": 0
 }
 
 
@@ -112,10 +105,8 @@ PUT {{baseUrl}}/clients/{{apiClientId}}
 Content-Type: application/json
 
 {
-  "limit": {
-    "rate": {{updatedRate}},
-    "capacity": {{updatedCapacity}}
-  }
+  "rate_per_sec": {{updatedRate}},
+  "capacity": {{updatedCapacity}}
 }
 
 ###
@@ -132,10 +123,8 @@ PUT {{baseUrl}}/clients/non-existent-client
 Content-Type: application/json
 
 {
-  "limit": {
-    "rate": 1,
-    "capacity": 1
-  }
+  "rate_per_sec": 1,
+  "capacity": 1
 }
 
 ###
@@ -147,10 +136,8 @@ Content-Type: application/json
 
 {
   "client_id": "different-id",
-  "limit": {
-    "rate": 1,
-    "capacity": 1
-  }
+  "rate_per_sec": 1,
+  "capacity": 1
 }
 
 
