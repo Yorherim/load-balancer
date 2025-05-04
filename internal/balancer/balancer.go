@@ -17,9 +17,14 @@ import (
 
 	// Импортируем пакет ratelimiter для использования.
 	"load-balancer/internal/config"
-	"load-balancer/internal/ratelimiter"
 	"load-balancer/internal/response"
 )
+
+// Limiter определяет интерфейс для Rate Limiter, необходимый балансировщику.
+type Limiter interface {
+	Allow(clientID string) bool
+	GetClientID(r *http.Request) string
+}
 
 // ErrNoHealthyBackends возвращается, когда нет доступных для запроса бэкендов.
 var ErrNoHealthyBackends = errors.New("нет доступных бэкендов")
@@ -62,13 +67,14 @@ type Balancer struct {
 	current             atomic.Uint64 // Используется только для Round Robin
 	algorithm           string        // Алгоритм балансировки ("round_robin" или "random")
 	rng                 *rand.Rand    // Генератор случайных чисел (для Random)
-	rateLimiter         *ratelimiter.RateLimiter
+	rateLimiter         Limiter       // Используем интерфейс вместо конкретного типа
 	healthCheckConfig   config.HealthCheckConfig
 	healthCheckStopChan chan struct{}
 }
 
 // New создает новый экземпляр Balancer.
-func New(backendUrls []string, rl *ratelimiter.RateLimiter, hcConfig config.HealthCheckConfig, algorithm string) (*Balancer, error) {
+// Теперь принимает интерфейс Limiter.
+func New(backendUrls []string, rl Limiter, hcConfig config.HealthCheckConfig, algorithm string) (*Balancer, error) {
 	if len(backendUrls) == 0 {
 		return nil, fmt.Errorf("не указаны бэкенд-серверы")
 	}
@@ -123,9 +129,10 @@ func New(backendUrls []string, rl *ratelimiter.RateLimiter, hcConfig config.Heal
 			// Используем GetClientID из переданного Rate Limiter
 			// Проверяем на nil на всякий случай
 			clientID := "unknown"
-			if rl != nil {
-				clientID = rl.GetClientID(req)
-			}
+			// Используем интерфейс Limiter, проверка на nil не нужна, если интерфейс не nil
+			// if rl != nil { // Больше не нужно, если rl интерфейс
+			clientID = rl.GetClientID(req)
+			// }
 			log.Printf("[Balancer] Ошибка проксирования на Бэкенд #%d (%s) для запроса от '%s': %v. Помечаем как нерабочий.",
 				backendIndex, parsedURL.String(), clientID, err)
 			// Находим нужный бэкенд по индексу (теперь он есть в замыкании)
@@ -225,13 +232,15 @@ func (b *Balancer) getRandomHealthyBackend() (*Backend, int, error) {
 func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Логируем входящий запрос
 	clientID := "unknown"
-	if b.rateLimiter != nil {
-		// Получаем идентификатор клиента ДО проверки лимита
-		clientID = b.rateLimiter.GetClientID(r)
-	}
+	// Используем интерфейс Limiter
+	// if b.rateLimiter != nil { // Проверка больше не нужна, интерфейс будет либо nil, либо реализацией
+	// Получаем идентификатор клиента ДО проверки лимита
+	clientID = b.rateLimiter.GetClientID(r)
+	// }
 	log.Printf("[Request] Получен запрос: Метод=%s Путь=%s От=%s (%s)", r.Method, r.URL.Path, r.RemoteAddr, clientID)
 
 	// 1. Rate Limiting (если включен)
+	// Интерфейс будет nil, если rate limiter выключен или не передан
 	if b.rateLimiter != nil {
 		if !b.rateLimiter.Allow(clientID) {
 			// Используем новую функцию для ответа

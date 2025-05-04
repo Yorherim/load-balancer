@@ -61,6 +61,7 @@ func main() {
 
 	// Инициализация Rate Limiter
 	// Передаем указатель на секцию RateLimiter из конфига и store (может быть nil)
+	// ratelimiter.New ожидает *config.RateLimiterConfig
 	rateLimiter, err := ratelimiter.New(&cfg.RateLimiter, store)
 	if err != nil {
 		// Обрабатываем ошибку от New, если она есть (хотя пока New ее не возвращает)
@@ -68,10 +69,11 @@ func main() {
 	}
 
 	// Инициализация балансировщика
+	// balancer.New ожидает config.HealthCheckConfig (значение)
 	lb, err := balancer.New(
 		cfg.BackendServers,
 		rateLimiter,
-		cfg.HealthCheck,
+		cfg.HealthCheck, // Передаем значение структуры
 		cfg.LoadBalancingAlgorithm,
 	)
 	if err != nil {
@@ -131,6 +133,8 @@ func main() {
 
 	// Останавливаем фоновые процессы:
 	// Сначала останавливаем Health Checks балансировщика.
+	// Метод StopHealthChecks вызывается всегда, даже если HealthCheck был nil/disabled,
+	// внутри Balancer есть проверка healthCheckStopChan != nil
 	lb.StopHealthChecks()
 
 	// Затем останавливаем Ticker в Rate Limiter.

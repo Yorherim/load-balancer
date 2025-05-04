@@ -37,7 +37,7 @@ run: build ## Собрать и запустить приложение лока
 
 test: ## Запустить все тесты (юнит и интеграционные)
 	@echo "Запуск тестов..."
-	@go test ./... -cover
+	@go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
 
 race: ## Запустить тесты с детектором гонок
 	@echo "Запуск тестов с детектором гонок..."

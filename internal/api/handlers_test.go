@@ -4,9 +4,12 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -233,5 +236,266 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
-// Дополнительные тесты можно добавить для проверки одновременного доступа,
-// но для этого потребуется более сложная настройка.
+// --- Mocks and Helpers ---
+
+// mockStore реализует ClientLimitStore для тестов
+type mockStore struct {
+	getClientLimitConfigFunc func(clientID string) (rate, capacity float64, found bool, err error)
+	createClientLimitFunc    func(clientID string, limit config.ClientRateConfig) error
+	updateClientLimitFunc    func(clientID string, limit config.ClientRateConfig) error
+	deleteClientLimitFunc    func(clientID string) error
+}
+
+func (m *mockStore) GetClientLimitConfig(clientID string) (rate, capacity float64, found bool, err error) {
+	if m.getClientLimitConfigFunc != nil {
+		return m.getClientLimitConfigFunc(clientID)
+	}
+	// Дефолтная реализация (не найдено)
+	return 0, 0, false, nil
+}
+
+func (m *mockStore) CreateClientLimit(clientID string, limit config.ClientRateConfig) error {
+	if m.createClientLimitFunc != nil {
+		return m.createClientLimitFunc(clientID, limit)
+	}
+	// Дефолтная реализация (успех)
+	return nil
+}
+
+func (m *mockStore) UpdateClientLimit(clientID string, limit config.ClientRateConfig) error {
+	if m.updateClientLimitFunc != nil {
+		return m.updateClientLimitFunc(clientID, limit)
+	}
+	// Дефолтная реализация (успех)
+	return nil
+}
+
+func (m *mockStore) DeleteClientLimit(clientID string) error {
+	if m.deleteClientLimitFunc != nil {
+		return m.deleteClientLimitFunc(clientID)
+	}
+	// Дефолтная реализация (успех)
+	return nil
+}
+
+// --- Новые тесты для покрытия --- //
+
+// TestAPIHandler_NewNilStore проверяет создание хендлера с nil store
+func TestAPIHandler_NewNilStore(t *testing.T) {
+	// Ожидаем, что не будет паники и вернется хендлер
+	// Лог предупреждения мы проверить не можем стандартными средствами,
+	// но сам факт вызова покрывает код.
+	h := api.NewAPIHandler(nil)
+	if h == nil {
+		t.Error("NewAPIHandler(nil) должен возвращать не-nil хендлер")
+	}
+	if h.Store != nil {
+		t.Error("h.Store должен быть nil, если передан nil store")
+	}
+}
+
+// TestAPIHandler_ServeHTTP_NilStore проверяет ответ при nil store
+func TestAPIHandler_ServeHTTP_NilStore(t *testing.T) {
+	h := api.NewAPIHandler(nil) // Создаем хендлер с nil store
+	req := httptest.NewRequest(http.MethodGet, "/clients/some-id", nil)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	assertStatusCode(t, rr, http.StatusServiceUnavailable)
+	assertErrorResponse(t, rr, "Хранилище лимитов недоступно")
+}
+
+// TestAPIHandler_ServeHTTP_MethodNotAllowed проверяет ответ для некорректного метода
+func TestAPIHandler_ServeHTTP_MethodNotAllowed(t *testing.T) {
+	store := &mockStore{}
+	h := api.NewAPIHandler(store)
+
+	tests := []struct {
+		method string
+		target string
+	}{
+		{http.MethodDelete, "/clients"},       // Неверный метод для коллекции
+		{http.MethodPut, "/clients"},          // Неверный метод для коллекции
+		{http.MethodPost, "/clients/some-id"}, // Неверный метод для ресурса
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%s_%s", tc.method, tc.target), func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.target, nil)
+			rr := httptest.NewRecorder()
+
+			// Для обработки пути используем ServeMux, как в main.go
+			mux := http.NewServeMux()
+			mux.Handle("/clients/", http.StripPrefix("/clients", h))
+			mux.Handle("/clients", http.StripPrefix("/clients", h))
+
+			mux.ServeHTTP(rr, req)
+			assertStatusCode(t, rr, http.StatusMethodNotAllowed)
+		})
+	}
+}
+
+// TestAPIHandler_ServeHTTP_GetClientsNotImplemented проверяет ответ для GET /clients
+func TestAPIHandler_ServeHTTP_GetClientsNotImplemented(t *testing.T) {
+	store := &mockStore{}
+	h := api.NewAPIHandler(store)
+	req := httptest.NewRequest(http.MethodGet, "/clients", nil)
+	rr := httptest.NewRecorder()
+
+	// Используем ServeMux, как в main.go
+	mux := http.NewServeMux()
+	mux.Handle("/clients/", http.StripPrefix("/clients", h))
+	mux.Handle("/clients", http.StripPrefix("/clients", h))
+	mux.ServeHTTP(rr, req)
+
+	assertStatusCode(t, rr, http.StatusNotImplemented)
+	assertErrorResponse(t, rr, "Получение списка всех клиентов не реализовано")
+}
+
+// TestAPIHandler_CreateClient_StoreError проверяет 500 при ошибке создания в store
+func TestAPIHandler_CreateClient_StoreError(t *testing.T) {
+	expectedError := errors.New("db is on fire")
+	store := &mockStore{
+		createClientLimitFunc: func(clientID string, limit config.ClientRateConfig) error {
+			return expectedError // Возвращаем НЕ ошибку конфликта
+		},
+	}
+	h := api.NewAPIHandler(store)
+	body := `{"client_id":"test-client","limit":{"rate":10,"capacity":100}}`
+	// URL должен включать префикс, который будет удален StripPrefix
+	req := httptest.NewRequest(http.MethodPost, "/clients", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	// Используем ServeMux и StripPrefix для корректной маршрутизации
+	mux := http.NewServeMux()
+	mux.Handle("/clients/", http.StripPrefix("/clients", h))
+	mux.Handle("/clients", http.StripPrefix("/clients", h))
+	mux.ServeHTTP(rr, req)
+
+	assertStatusCode(t, rr, http.StatusInternalServerError)
+	assertErrorResponseContains(t, rr, "Ошибка создания лимита в БД")
+}
+
+// TestAPIHandler_GetClient_StoreError проверяет 500 при ошибке получения из store
+func TestAPIHandler_GetClient_StoreError(t *testing.T) {
+	expectedError := errors.New("cannot reach db")
+	store := &mockStore{
+		getClientLimitConfigFunc: func(clientID string) (rate, capacity float64, found bool, err error) {
+			return 0, 0, false, expectedError
+		},
+	}
+	h := api.NewAPIHandler(store)
+	req := httptest.NewRequest(http.MethodGet, "/clients/some-id", nil)
+	rr := httptest.NewRecorder()
+
+	// Используем ServeMux
+	mux := http.NewServeMux()
+	mux.Handle("/clients/", http.StripPrefix("/clients", h))
+	mux.ServeHTTP(rr, req)
+
+	assertStatusCode(t, rr, http.StatusInternalServerError)
+	assertErrorResponseContains(t, rr, "Ошибка получения лимита из БД")
+}
+
+// TestAPIHandler_UpdateClient_StoreError проверяет 500 при ошибке обновления в store
+func TestAPIHandler_UpdateClient_StoreError(t *testing.T) {
+	expectedError := errors.New("failed to update")
+	store := &mockStore{
+		updateClientLimitFunc: func(clientID string, limit config.ClientRateConfig) error {
+			return expectedError // Возвращаем НЕ ошибку "не найден"
+		},
+	}
+	h := api.NewAPIHandler(store)
+	body := `{"client_id":"test-client","limit":{"rate":20,"capacity":200}}`
+	req := httptest.NewRequest(http.MethodPut, "/clients/test-client", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	// Используем ServeMux
+	mux := http.NewServeMux()
+	mux.Handle("/clients/", http.StripPrefix("/clients", h))
+	mux.ServeHTTP(rr, req)
+
+	assertStatusCode(t, rr, http.StatusInternalServerError)
+	assertErrorResponseContains(t, rr, "Ошибка обновления лимита в БД")
+}
+
+// TestAPIHandler_UpdateClient_BadJSON проверяет 400 при некорректном JSON
+func TestAPIHandler_UpdateClient_BadJSON(t *testing.T) {
+	store := &mockStore{} // Store не будет вызван
+	h := api.NewAPIHandler(store)
+	badBody := `{"client_id":"test-client","limit":{"rate":10,"capacity":100` // Незакрытая скобка
+	req := httptest.NewRequest(http.MethodPut, "/clients/test-client", strings.NewReader(badBody))
+	rr := httptest.NewRecorder()
+
+	// Используем ServeMux
+	mux := http.NewServeMux()
+	mux.Handle("/clients/", http.StripPrefix("/clients", h))
+	mux.ServeHTTP(rr, req)
+
+	assertStatusCode(t, rr, http.StatusBadRequest)
+	assertErrorResponseContains(t, rr, "Ошибка парсинга JSON")
+}
+
+// TestAPIHandler_DeleteClient_StoreError проверяет 500 при ошибке удаления в store
+func TestAPIHandler_DeleteClient_StoreError(t *testing.T) {
+	expectedError := errors.New("cannot delete")
+	store := &mockStore{
+		deleteClientLimitFunc: func(clientID string) error {
+			return expectedError // Возвращаем НЕ ошибку "не найден"
+		},
+	}
+	h := api.NewAPIHandler(store)
+	req := httptest.NewRequest(http.MethodDelete, "/clients/some-id", nil)
+	rr := httptest.NewRecorder()
+
+	// Используем ServeMux
+	mux := http.NewServeMux()
+	mux.Handle("/clients/", http.StripPrefix("/clients", h))
+	mux.ServeHTTP(rr, req)
+
+	assertStatusCode(t, rr, http.StatusInternalServerError)
+	assertErrorResponseContains(t, rr, "Ошибка БД")
+}
+
+// --- Вспомогательные функции для ассертов (если их еще нет) ---
+
+func assertStatusCode(t *testing.T, rr *httptest.ResponseRecorder, expectedStatus int) {
+	t.Helper()
+	if status := rr.Code; status != expectedStatus {
+		t.Errorf("handler returned wrong status code: got %v want %v",
+			status, expectedStatus)
+	}
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func assertErrorResponse(t *testing.T, rr *httptest.ResponseRecorder, expectedError string) {
+	t.Helper()
+	var respBody errorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &respBody); err != nil {
+		t.Fatalf("Could not unmarshal error response body: %v", err)
+	}
+	if respBody.Error != expectedError {
+		t.Errorf("handler returned unexpected error message: got %q want %q",
+			respBody.Error, expectedError)
+	}
+}
+
+func assertErrorResponseContains(t *testing.T, rr *httptest.ResponseRecorder, expectedSubstring string) {
+	t.Helper()
+	var respBody errorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &respBody); err != nil {
+		// Может быть не JSON ответ, если ошибка произошла до RespondWithError
+		if !strings.Contains(rr.Body.String(), expectedSubstring) {
+			t.Errorf("handler response body does not contain expected error substring: got %q want substring %q", rr.Body.String(), expectedSubstring)
+		}
+		return // Выходим, если не JSON
+	}
+	if !strings.Contains(respBody.Error, expectedSubstring) {
+		t.Errorf("handler returned error message does not contain expected substring: got %q want substring %q",
+			respBody.Error, expectedSubstring)
+	}
+}

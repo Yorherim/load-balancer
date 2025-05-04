@@ -10,8 +10,15 @@ import (
 
 	"load-balancer/internal/config" // Используем config.ClientRateConfig
 	"load-balancer/internal/response"
-	"load-balancer/internal/storage"
 )
+
+// ClientLimitStore определяет интерфейс для хранилища лимитов, необходимый API.
+type ClientLimitStore interface {
+	GetClientLimitConfig(clientID string) (rate, capacity float64, found bool, err error)
+	CreateClientLimit(clientID string, limit config.ClientRateConfig) error
+	UpdateClientLimit(clientID string, limit config.ClientRateConfig) error
+	DeleteClientLimit(clientID string) error
+}
 
 // ClientLimitRequest структура для тела запроса при создании/обновлении лимита.
 // Использует тип ClientRateConfig из пакета config.
@@ -29,11 +36,11 @@ type ClientLimitResponse struct {
 
 // APIHandler обрабатывает HTTP-запросы к API.
 type APIHandler struct {
-	Store *storage.DB // Используем storage.DB напрямую
+	Store ClientLimitStore // Используем интерфейс
 }
 
 // NewAPIHandler создает новый экземпляр APIHandler.
-func NewAPIHandler(store *storage.DB) *APIHandler {
+func NewAPIHandler(store ClientLimitStore) *APIHandler { // Принимаем интерфейс
 	if store == nil {
 		log.Println("[API] Warning: Хранилище (Store) не предоставлено APIHandler. CRUD операции не будут работать.")
 	}
