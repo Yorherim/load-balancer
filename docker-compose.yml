@@ -1,0 +1,55 @@
+version: '3.8' # Указываем версию синтаксиса Docker Compose
+
+services:
+  # Сервис балансировщика нагрузки
+  balancer:
+    build:
+      context: . # Собирать образ из Dockerfile в текущей директории
+      dockerfile: Dockerfile
+    container_name: load-balancer # Имя контейнера
+    ports:
+      - '8080:8080' # Пробрасываем порт 8080 хоста на порт 8080 контейнера
+    # Добавляем volume для проброса актуального config.yaml
+    volumes:
+      # Связываем config.yaml на хосте с /app/config.yaml внутри контейнера
+      # Режим ro (read-only) - хорошая практика для конфигов.
+      - ./config.yaml:/app/config.yaml:ro
+      # Связываем файл БД SQLite на хосте с файлом внутри контейнера
+      # Убедитесь, что путь соответствует database_path в config.yaml
+      # Не используем :ro, так как приложению нужно писать в БД (создавать таблицу)
+      - ./rate_limits.db:/app/rate_limits.db
+    depends_on:
+      # Балансировщик зависит от бэкендов, запускаем их первыми
+      - backend1
+      - backend2
+      - backend3
+    networks:
+      - app-network # Подключаем к общей сети
+
+  # Первый тестовый бэкенд-сервер
+  backend1:
+    image: nginxdemos/hello:plain-text # Используем простой образ, отвечающий текстом
+    container_name: backend-1
+    networks:
+      - app-network # Подключаем к общей сети
+    # Порт 80 этого контейнера будет доступен только изнутри сети app-network
+
+  # Второй тестовый бэкенд-сервер
+  backend2:
+    image: nginxdemos/hello:plain-text # Используем тот же образ
+    container_name: backend-2
+    networks:
+      - app-network # Подключаем к общей сети
+    # Порт 80 этого контейнера будет доступен только изнутри сети app-network
+
+  # Третий тестовый бэкенд-сервер (добавим его для примера)
+  backend3:
+    image: nginxdemos/hello:plain-text
+    container_name: backend-3
+    networks:
+      - app-network
+
+# Определяем сеть для взаимодействия контейнеров
+networks:
+  app-network:
+    driver: bridge # Используем стандартный драйвер сети bridge

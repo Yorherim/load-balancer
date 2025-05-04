@@ -1,0 +1,173 @@
+### requests.http
+### Файл для ручного тестирования балансировщика и API управления лимитами
+
+@baseUrl = http://localhost:8080
+@clientId = test-client-http
+@clientHeader = X-Client-ID
+
+###
+# --- Тестирование Балансировщика ---
+###
+
+# 1. Простой запрос к балансировщику (без ID клиента)
+# Ожидается ответ 200 OK от одного из бэкендов
+GET {{baseUrl}}/
+
+###
+
+# 2. Запрос с ID клиента (для Rate Limiter)
+# Ожидается ответ 200 OK от одного из бэкендов
+# Если Rate Limiter включен, для этого клиента будет создана корзина
+GET {{baseUrl}}/
+{{clientHeader}}: {{clientId}}
+
+
+###
+# --- Тестирование API Управления Лимитами ---
+###
+
+# --- Переменные для API ---
+@apiClientId = api-test-client-1
+@initialRate = 10
+@initialCapacity = 50
+@updatedRate = 20
+@updatedCapacity = 100
+
+###
+
+# 6. Создание нового лимита для клиента
+# Ожидается 201 Created
+POST {{baseUrl}}/clients
+Content-Type: application/json
+
+{
+  "client_id": "{{apiClientId}}",
+  "limit": {
+    "rate": {{initialRate}},
+    "capacity": {{initialCapacity}}
+  }
+}
+
+###
+
+# 7. Попытка создания дубликата
+# Ожидается 409 Conflict
+POST {{baseUrl}}/clients
+Content-Type: application/json
+
+{
+  "client_id": "{{apiClientId}}",
+  "limit": {
+    "rate": 1,
+    "capacity": 1
+  }
+}
+
+###
+
+# 8. Создание лимита - Некорректный JSON
+# Ожидается 400 Bad Request
+POST {{baseUrl}}/clients/
+Content-Type: application/json
+
+{
+  "client_id": "bad-json",
+  "limit": {
+    "rate": 1
+  } // Отсутствует закрывающая скобка
+
+###
+
+# 9. Создание лимита - Некорректные значения
+# Ожидается 400 Bad Request
+POST {{baseUrl}}/clients/
+Content-Type: application/json
+
+{
+  "client_id": "bad-values",
+  "limit": {
+    "rate": -5,
+    "capacity": 0
+  }
+}
+
+
+###
+
+# 10. Получение конфигурации лимита
+# Ожидается 200 OK
+GET {{baseUrl}}/clients/{{apiClientId}}
+
+###
+
+# 11. Получение конфигурации - Несуществующий клиент
+# Ожидается 404 Not Found
+GET {{baseUrl}}/clients/non-existent-client
+
+###
+
+# 12. Обновление лимита
+# Ожидается 200 OK
+PUT {{baseUrl}}/clients/{{apiClientId}}
+Content-Type: application/json
+
+{
+  "limit": {
+    "rate": {{updatedRate}},
+    "capacity": {{updatedCapacity}}
+  }
+}
+
+###
+
+# 13. Проверка обновления через GET
+# Ожидается 200 OK с обновленными значениями
+GET {{baseUrl}}/clients/{{apiClientId}}
+
+###
+
+# 14. Обновление лимита - Несуществующий клиент
+# Ожидается 404 Not Found
+PUT {{baseUrl}}/clients/non-existent-client
+Content-Type: application/json
+
+{
+  "limit": {
+    "rate": 1,
+    "capacity": 1
+  }
+}
+
+###
+
+# 15. Обновление лимита - Несовпадение ID (если ваш API это проверяет)
+# Может вернуть 400 Bad Request или обновить по ID из URL
+PUT {{baseUrl}}/clients/{{apiClientId}}
+Content-Type: application/json
+
+{
+  "client_id": "different-id",
+  "limit": {
+    "rate": 1,
+    "capacity": 1
+  }
+}
+
+
+###
+
+# 16. Удаление лимита
+# Ожидается 204 No Content
+DELETE {{baseUrl}}/clients/{{apiClientId}}
+
+###
+
+# 17. Проверка удаления через GET
+# Ожидается 404 Not Found
+GET {{baseUrl}}/clients/{{apiClientId}}
+
+###
+
+# 18. Удаление лимита - Несуществующий клиент
+# Ожидается 404 Not Found
+DELETE {{baseUrl}}/clients/non-existent-client
