@@ -1,4 +1,3 @@
-// Package ratelimiter_test содержит тесты для пакета ratelimiter.
 package ratelimiter_test
 
 import (
@@ -11,11 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"load-balancer/internal/config"
-	"load-balancer/internal/ratelimiter" // Импортируем тестируемый пакет
-	"load-balancer/internal/storage"     // Нужен для storage.ClientState
+	"load-balancer/internal/ratelimiter"
+	"load-balancer/internal/storage"
 )
 
-// Убедимся, что MockStore реализует оба интерфейса (статическая проверка)
 var (
 	_ ratelimiter.StoreConfigInterface = (*MockStore)(nil)
 	_ ratelimiter.StateStore           = (*MockStore)(nil)
@@ -170,79 +168,6 @@ func TestNewRateLimiter(t *testing.T) {
 	rlNoStore.Stop()
 }
 
-// TestRateLimiter_Allow проверяет основную логику Allow.
-func TestRateLimiter_Allow(t *testing.T) {
-	t.Skip("Тест нестабилен из-за фонового тикера и time.Sleep. Требует рефакторинга с мокированием времени.")
-	// ... (остальной код теста остается закомментированным или удаленным)
-	/*
-		mockStore := NewMockStore() // Используем новый мок
-		clientID := "test-client"
-		rate := 1.0 // 1 токен в секунду
-		capacity := 2.0
-
-		// Настраиваем мок: ожидаем вызов GetClientLimitConfig при первом Allow
-		mockStore.On("GetClientLimitConfig", clientID).Return(rate, capacity, true, nil).Once()
-		// Мок НЕ является *storage.DB, поэтому GetClientSavedState не будет вызываться
-
-		// Используем дефолтные значения конфига, т.к. они не влияют на логику Allow напрямую,
-		// а берутся из мока.
-		cfg := &config.RateLimiterConfig{Enabled: true, DefaultRate: 99, DefaultCapacity: 999}
-		rl, err := ratelimiter.New(cfg, mockStore)
-		require.NoError(t, err)
-		defer rl.Stop()
-
-		// --- Тесты логики корзины ---
-		// Важно: этот тест теперь использует фоновый тикер!
-		// Результаты могут быть неточными из-за таймингов.
-		// Перепишем тест с учетом этого или замокаем время.
-		// Пока оставим как есть, но с примечанием.
-
-		t.Log("ВНИМАНИЕ: Тест TestRateLimiter_Allow может быть нестабильным из-за фонового тикера.")
-
-		// 1. Req 1: OK (2 -> 1 токен)
-		assert.True(t, rl.Allow(clientID), "Req 1")
-		mockStore.AssertExpectations(t) // Проверяем, что GetClientLimitConfig был вызван
-
-		// Настроим мок для последующих вызовов GetClientLimitConfig (если они будут при обновлении)
-		mockStore.On("GetClientLimitConfig", clientID).Return(rate, capacity, true, nil)
-
-		// 2. Req 2: OK (1 -> 0 токенов)
-		assert.True(t, rl.Allow(clientID), "Req 2")
-
-		// 3. Req 3: Fail (0 токенов)
-		assert.False(t, rl.Allow(clientID), "Req 3")
-
-		// 4. Пауза ~1.5 сек.
-		time.Sleep(1500 * time.Millisecond)
-
-		// За это время тикер должен был добавить ~1.5 * rate = 1.5 токена.
-		// Становится min(capacity=2, 0 + 1.5) = 1.5 токена.
-
-		// 5. Req 4: OK (1.5 -> 0.5 токена)
-		assert.True(t, rl.Allow(clientID), "Req 4 (после 1й паузы)")
-
-		// 6. Req 5: Fail (0.5 токена < 1)
-		assert.False(t, rl.Allow(clientID), "Req 5")
-
-		// 7. Пауза ~1.5 сек.
-		time.Sleep(1500 * time.Millisecond)
-
-		// За это время тикер должен был добавить ~1.5 * rate = 1.5 токена.
-		// Становится min(capacity=2, 0.5 + 1.5) = 2.0 токена.
-
-		// 8. Req 6: OK (2.0 -> 1.0 токен)
-		assert.True(t, rl.Allow(clientID), "Req 6 (после 2й паузы)")
-
-		// 9. Req 7: OK (1.0 -> 0.0 токенов)
-		assert.True(t, rl.Allow(clientID), "Req 7")
-
-		// 10. Req 8: Fail (0.0 токенов)
-		assert.False(t, rl.Allow(clientID), "Req 8")
-
-		mockStore.AssertExpectations(t) // Проверяем все вызовы
-	*/
-}
-
 // TestRateLimiter_GetClientID проверяет получение ID клиента.
 func TestRateLimiter_GetClientID(t *testing.T) {
 	cfgHeader := &config.RateLimiterConfig{Enabled: true, IdentifierHeader: "X-Real-ID"}
@@ -292,73 +217,6 @@ func TestRateLimiter_GetClientID(t *testing.T) {
 	reqInvalidAddr := httptest.NewRequest("GET", "/", nil)
 	reqInvalidAddr.RemoteAddr = "invalid-address"
 	assert.Equal(t, "invalid-address", rlIP.GetClientID(reqInvalidAddr), "Должен возвращаться RemoteAddr как есть при ошибке парсинга")
-}
-
-// TestRateLimiter_DynamicLimits проверяет обновление лимитов из хранилища.
-func TestRateLimiter_DynamicLimits(t *testing.T) {
-	t.Skip("Тест нестабилен из-за фонового тикера и time.Sleep. Требует рефакторинга с мокированием времени.")
-	// ... (остальной код теста остается закомментированным или удаленным)
-	/*
-		mockStore := NewMockStore() // Используем новый мок
-		clientID := "dynamic-client"
-
-		// Начальные лимиты (1 токен/сек, емкость 1)
-		initialRate := 1.0
-		initialCapacity := 1.0
-		mockStore.On("GetClientLimitConfig", clientID).Return(initialRate, initialCapacity, true, nil).Once() // Первый вызов
-
-		cfg := &config.RateLimiterConfig{Enabled: true, DefaultRate: 1, DefaultCapacity: 1}
-		rl, err := ratelimiter.New(cfg, mockStore)
-		require.NoError(t, err)
-		defer rl.Stop()
-
-		// 1. Первый запрос - разрешен (1 -> 0 токенов)
-		assert.True(t, rl.Allow(clientID), "Запрос 1 (лимит 1)")
-		mockStore.AssertCalled(t, "GetClientLimitConfig", clientID) // Убедимся, что вызвали
-
-		// Настраиваем мок на постоянный возврат начальных лимитов, пока мы их не изменим
-		mockStore.On("GetClientLimitConfig", clientID).Return(initialRate, initialCapacity, true, nil)
-
-		// 2. Второй запрос - запрещен (0 токенов)
-		assert.False(t, rl.Allow(clientID), "Запрос 2 (лимит 1)")
-
-		// --- Обновляем лимиты в моке ---
-		newRate := 5.0
-		newCapacity := 5.0
-		// Перенастраиваем мок: теперь GetClientLimitConfig будет возвращать новые значения
-		mockStore.ExpectedCalls = nil // Сбрасываем предыдущие ожидания .Return
-		mockStore.On("GetClientLimitConfig", clientID).Return(newRate, newCapacity, true, nil)
-
-		// 3. Ждем > 1 сек (1.5 сек)
-		time.Sleep(1500 * time.Millisecond)
-
-		// Тикер добавил 1.5 * initialRate = 1.5 токена. Стало min(initialCapacity=1, 0 + 1.5) = 1 токен.
-
-		// 4. Третий запрос.
-		// getOrCreateBucket вызовет GetClientLimitConfig, получит newRate/newCapacity.
-		// updateBucketIfNeeded обновит bucket.rate=5, bucket.capacity=5.
-		// bucket.tokens останется 1.
-		// Allow разрешит запрос (1 -> 0 токенов).
-		assert.True(t, rl.Allow(clientID), "Запрос 3 после обновления и паузы")
-		mockStore.AssertCalled(t, "GetClientLimitConfig", clientID) // Убедимся, что вызвали снова
-
-		// 5. Четвертый запрос - запрещен (0 токенов)
-		assert.False(t, rl.Allow(clientID), "Запрос 4")
-
-		// 6. Ждем еще > 1 сек (1.5 сек).
-		time.Sleep(1500 * time.Millisecond)
-		// Тикер теперь работает с newRate=5. Добавит 1.5 * 5 = 7.5 токенов.
-		// Станет min(newCapacity=5, 0 + 7.5) = 5 токенов.
-
-		// 7. Проверяем, что теперь можно сделать 5 запросов
-		for i := 0; i < 5; i++ {
-			assert.True(t, rl.Allow(clientID), fmt.Sprintf("Запрос %d (лимит 5)", i+5))
-		}
-		// 8. Следующий запрос должен быть заблокирован
-		assert.False(t, rl.Allow(clientID), "Запрос 10 (лимит 5)")
-
-		mockStore.AssertExpectations(t)
-	*/
 }
 
 // TestRateLimiter_LoadState проверяет загрузку состояния из store (*storage.DB)

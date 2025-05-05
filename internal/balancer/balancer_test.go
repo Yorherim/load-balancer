@@ -1,4 +1,3 @@
-// Package balancer_test содержит тесты для пакета balancer.
 package balancer_test
 
 import (
@@ -8,12 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"load-balancer/internal/balancer" // Импортируем тестируемый пакет
-	"load-balancer/internal/config"   // Добавляем импорт config
+	"load-balancer/internal/balancer"
+	"load-balancer/internal/config"
 	"load-balancer/internal/ratelimiter"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock" // Добавляем mock
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,8 +68,7 @@ func setupTestBalancer(b *testing.B) (*balancer.Balancer, *httptest.Server) {
 		fmt.Fprintln(w, "Hello from backend")
 	}))
 
-	// Создаем мок-хранилище для Rate Limiter.
-	mockStore := NewMockRateLimitStore() // Используем локальный мок
+	mockStore := NewMockRateLimitStore()
 	// Настроим мок: для любого клиента возвращаем 'не найдено', чтобы использовались дефолты RL
 	mockStore.On("GetClientLimitConfig", mock.Anything).Return(0.0, 0.0, false, nil)
 
@@ -119,13 +117,9 @@ func BenchmarkServeHTTP(b *testing.B) {
 
 	// Запускаем бенчмарк параллельно.
 	b.RunParallel(func(pb *testing.PB) {
-		// Каждая горутина будет выполнять этот код в цикле.
 		for pb.Next() {
-			// Создаем тестовый запрос.
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			// Добавляем заголовок для идентификации (не обязательно для этого бенчмарка).
 			req.Header.Set("X-Client-ID", "bench-client")
-			// Создаем рекордер для записи ответа.
 			w := httptest.NewRecorder()
 
 			// Вызываем тестируемый обработчик.
@@ -145,7 +139,7 @@ func BenchmarkServeHTTP(b *testing.B) {
 
 func TestNewBalancer_InvalidAlgorithm(t *testing.T) {
 	backendUrls := []string{"http://localhost:1234"}
-	// Используем конструктор New с nil store для RL
+
 	rlCfg := &config.RateLimiterConfig{Enabled: false} // RL выключен
 	rl, errRl := ratelimiter.New(rlCfg, nil)
 	require.NoError(t, errRl, "Ошибка создания выключенного Rate Limiter")
@@ -153,12 +147,9 @@ func TestNewBalancer_InvalidAlgorithm(t *testing.T) {
 	hcConfig := config.HealthCheckConfig{Enabled: false}
 	invalidAlgo := "least_connections"
 
-	// Логгер теперь выводит Warning и использует дефолтный алгоритм
-	// Проверяем, что ошибки нет и балансировщик создан
 	lb, err := balancer.New(backendUrls, rl, hcConfig, invalidAlgo)
 	require.NoError(t, err, "Не должно быть ошибки для невалидного алгоритма")
 	require.NotNil(t, lb, "Балансировщик должен быть создан")
-	// TODO: Проверить, что используется round_robin (сложно без экспорта поля)
 }
 
 func TestNewBalancer_NoBackends(t *testing.T) {

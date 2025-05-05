@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"load-balancer/internal/config"  // Для типа ClientRateConfig
-	"load-balancer/internal/storage" // Импортируем тестируемый пакет
+	"load-balancer/internal/config"
+	"load-balancer/internal/storage"
 
-	_ "modernc.org/sqlite" // Импортируем драйвер
+	_ "modernc.org/sqlite"
 )
 
 // setupTestDB создает временную базу данных SQLite для теста.

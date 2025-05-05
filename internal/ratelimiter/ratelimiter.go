@@ -1,5 +1,3 @@
-// Package ratelimiter реализует ограничение частоты запросов по IP или заголовку
-// с использованием алгоритма Token Bucket и хранением лимитов в БД.
 package ratelimiter
 
 import (
@@ -15,9 +13,6 @@ import (
 	"load-balancer/internal/storage"
 )
 
-// RateLimitStore определяет методы, необходимые для управления *конфигурацией* лимитов.
-// Состояние (токены, время) управляется отдельно и сохраняется/загружается
-// напрямую через конкретную реализацию (например, *storage.DB).
 type StoreConfigInterface interface {
 	// GetClientLimitConfig извлекает только конфигурацию лимита (rate, capacity) для клиента.
 	GetClientLimitConfig(clientID string) (rate, capacity float64, found bool, err error)
@@ -28,14 +23,11 @@ type StoreConfigInterface interface {
 	SupportsStatePersistence() bool
 }
 
-// StateStore определяет методы для работы с сохраненным состоянием.
-// Используется для type assertion, когда SupportsStatePersistence() == true.
 type StateStore interface {
 	GetClientSavedState(clientID string) (tokens float64, lastRefill time.Time, found bool, err error)
 	BatchUpdateClientState(states map[string]storage.ClientState) error
 }
 
-// TokenBucket представляет "корзину токенов" для одного клиента.
 type TokenBucket struct {
 	// capacity - максимальное количество токенов в корзине.
 	capacity float64
@@ -71,8 +63,6 @@ type RateLimiter struct {
 	quit   chan struct{}
 }
 
-// New создает новый экземпляр RateLimiter.
-// Принимает конфигурацию и реализацию StoreConfigInterface.
 func New(cfg *config.RateLimiterConfig, store StoreConfigInterface) (*RateLimiter, error) {
 	if !cfg.Enabled {
 		log.Println("[RateLimiter] Выключен.")
@@ -112,8 +102,7 @@ func New(cfg *config.RateLimiterConfig, store StoreConfigInterface) (*RateLimite
 func NewDisabled() *RateLimiter {
 	return &RateLimiter{
 		enabled: false,
-		buckets: make(map[string]*TokenBucket), // Инициализируем, чтобы избежать nil паники
-		// Остальные поля не важны, так как enabled=false
+		buckets: make(map[string]*TokenBucket),
 	}
 }
 

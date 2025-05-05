@@ -1,4 +1,3 @@
-// Package storage предоставляет функции для работы с хранилищем данных (SQLite).
 package storage
 
 import (
@@ -9,10 +8,8 @@ import (
 	"sync"
 	"time"
 
-	// Импортируем переименованный тип
 	"load-balancer/internal/config"
 
-	// Импортируем pure-Go драйвер SQLite
 	_ "modernc.org/sqlite"
 )
 
@@ -74,7 +71,6 @@ func (db *DB) Close() error {
 }
 
 // GetClientLimitAndState извлекает полное состояние лимита для клиента из базы данных.
-// Возвращает конфиг (rate, capacity) и сохраненное состояние (tokens, lastRefill).
 func (db *DB) GetClientLimitAndState(clientID string) (rate, capacity, tokens float64, lastRefill time.Time, found bool, err error) {
 	var rateDB, capacityDB, tokensDB float64
 	var lastRefillStr string
@@ -259,6 +255,3 @@ func (db *DB) BatchUpdateClientState(states map[string]ClientState) error {
 func (db *DB) SupportsStatePersistence() bool {
 	return true
 }
-
-// TODO: Добавить функции для CRUD операций (SetClientLimit, DeleteClientLimit), если потребуется API.
-// Метод BatchUpdateClientState добавлен выше.

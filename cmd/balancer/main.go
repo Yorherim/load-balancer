@@ -1,32 +1,26 @@
 package main
 
 import (
-	"context" // Для server.Shutdown
+	"context"
 	"log"
 	"net/http"
-	"os"        // Для сигналов
-	"os/signal" // Для сигналов
-	"syscall"   // Для сигналов SIGINT, SIGTERM
-	"time"      // Для таймаута Shutdown
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	// "net/http/httputil" // Перенесено в пакет balancer
-	// "net/url" // Используется внутри пакета balancer
-
-	"load-balancer/internal/api" // Добавляем импорт API
+	"load-balancer/internal/api"
 	"load-balancer/internal/config"
 
-	// Импортируем наш новый пакет balancer
 	"load-balancer/internal/balancer"
-	// Импортируем пакет ratelimiter
+
 	"load-balancer/internal/ratelimiter"
-	// Импортируем пакет storage
+
 	"load-balancer/internal/storage"
 
-	// Драйвер SQLite (modernc.org/sqlite)
 	_ "modernc.org/sqlite"
 )
 
-// main является точкой входа в приложение балансировщика нагрузки.
 func main() {
 	log.Println("Запуск балансировщика...")
 	configPath := "config.yaml"
@@ -86,21 +80,19 @@ func main() {
 	// Создаем основной маршрутизатор
 	smux := http.NewServeMux()
 	smux.Handle("/clients", http.StripPrefix("/clients", apiHandler))
-	smux.Handle("/clients/", http.StripPrefix("/clients", apiHandler)) // Маршрут для API
-	smux.Handle("/", lb)                                               // Основной маршрут для балансировщика
+	smux.Handle("/clients/", http.StripPrefix("/clients", apiHandler))
+	smux.Handle("/", lb)
 
 	// 7. Настраиваем и запускаем HTTP-сервер.
 	addr := ":" + cfg.Port
 	server := &http.Server{
 		Addr:    addr,
-		Handler: smux, // Используем новый mux
+		Handler: smux,
 	}
 
-	// Канал для прослушивания сигналов ОС.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	// Запускаем сервер в горутине, чтобы не блокировать.
 	go func() {
 		log.Printf("Балансировщик запущен на %s", addr)
 		log.Printf("API доступно по префиксу /clients/")

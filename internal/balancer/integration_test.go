@@ -1,4 +1,3 @@
-// Package balancer_test содержит интеграционные тесты для пакета balancer.
 package balancer_test
 
 import (
@@ -8,7 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync" // Добавляем sync для мьютекса
+	"sync"
 	"testing"
 	"time"
 
@@ -16,12 +15,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"load-balancer/internal/balancer" // Используем тип ClientLimit
-	"load-balancer/internal/config"   // Добавляем config
+	"load-balancer/internal/balancer"
+	"load-balancer/internal/config"
 	"load-balancer/internal/ratelimiter"
-	"load-balancer/internal/response" // Убедимся, что импорт на месте
-	// Импортируем пакет с экспортированным моком
-	// Импорт для ErrorResponse
+	"load-balancer/internal/response"
 )
 
 // --- Управляемый обработчик для Health Checks ---
@@ -176,14 +173,6 @@ func setupIntegrationTest(t *testing.T,
 	})
 
 	return setup
-}
-
-// backendHandler - старый обработчик, больше не используется напрямую в setup
-func backendHandler(id int) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Backend %d OK\n", id) // Оставляем \n
-	}
 }
 
 // sendRequest отправляет запрос на балансировщик и возвращает тело ответа и статус код.

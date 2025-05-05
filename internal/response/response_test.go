@@ -1,4 +1,3 @@
-// Package response_test содержит тесты для пакета response.
 package response_test
 
 import (
@@ -10,8 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"load-balancer/internal/response" // Импортируем тестируемый пакет
-	// TODO: Как протестировать логирование? Пока опускаем.
+	"load-balancer/internal/response"
 )
 
 // TestRespondWithError проверяет функцию RespondWithError.

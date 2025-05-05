@@ -1,4 +1,3 @@
-// Package api содержит обработчики для CRUD операций с лимитами клиентов.
 package api
 
 import (
@@ -8,11 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	"load-balancer/internal/config" // Используем config.ClientRateConfig
+	"load-balancer/internal/config"
 	"load-balancer/internal/response"
 )
 
-// ClientLimitStore определяет интерфейс для хранилища лимитов, необходимый API.
 type ClientLimitStore interface {
 	GetClientLimitConfig(clientID string) (rate, capacity float64, found bool, err error)
 	CreateClientLimit(clientID string, limit config.ClientRateConfig) error
@@ -21,15 +19,13 @@ type ClientLimitStore interface {
 }
 
 // ClientLimitRequest структура для тела запроса при создании/обновлении лимита.
-// Использует плоскую структуру согласно заданию.
 type ClientLimitRequest struct {
 	ClientID string  `json:"client_id"`
-	Rate     float64 `json:"rate_per_sec"` // Изменяем JSON-тег
+	Rate     float64 `json:"rate_per_sec"`
 	Capacity float64 `json:"capacity"`
 }
 
 // ClientLimitResponse структура для ответа при получении/создании/обновлении лимита.
-// Использует плоскую структуру.
 type ClientLimitResponse struct {
 	ClientID string  `json:"client_id"`
 	Rate     float64 `json:"rate_per_sec"`
@@ -38,19 +34,16 @@ type ClientLimitResponse struct {
 
 // APIHandler обрабатывает HTTP-запросы к API.
 type APIHandler struct {
-	Store ClientLimitStore // Используем интерфейс
+	Store ClientLimitStore
 }
 
-// NewAPIHandler создает новый экземпляр APIHandler.
-func NewAPIHandler(store ClientLimitStore) *APIHandler { // Принимаем интерфейс
+func NewAPIHandler(store ClientLimitStore) *APIHandler {
 	if store == nil {
 		log.Println("[API] Warning: Хранилище (Store) не предоставлено APIHandler. CRUD операции не будут работать.")
 	}
 	return &APIHandler{Store: store}
 }
 
-// ServeHTTP является основным маршрутизатором для /clients API.
-// Он определяет метод и наличие clientID в пути *после* StripPrefix.
 func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Проверяем, что store доступен.
 	if h.Store == nil {
@@ -119,8 +112,8 @@ func (h *APIHandler) createClient(w http.ResponseWriter, r *http.Request) {
 
 	err := h.Store.CreateClientLimit(req.ClientID, limitConfig)
 	if err != nil {
-		// Проверяем, является ли ошибка конфликтом (уже существует)
-		if strings.Contains(err.Error(), "уже существует") { // TODO: Более надежная проверка ошибки
+		// TODO: сделать более корректную проверку на ошибки
+		if strings.Contains(err.Error(), "уже существует") {
 			response.RespondWithError(w, http.StatusConflict, err.Error())
 		} else {
 			response.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка создания лимита в БД: %v", err))
@@ -185,7 +178,8 @@ func (h *APIHandler) updateClient(w http.ResponseWriter, r *http.Request, client
 
 	err := h.Store.UpdateClientLimit(clientID, limitConfig)
 	if err != nil {
-		if strings.Contains(err.Error(), "не найден для обновления") { // TODO: Более надежная проверка ошибки
+		// TODO: сделать более корректную проверку на ошибки
+		if strings.Contains(err.Error(), "не найден для обновления") {
 			response.RespondWithError(w, http.StatusNotFound, err.Error())
 		} else {
 			response.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка обновления лимита в БД: %v", err))

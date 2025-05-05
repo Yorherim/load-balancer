@@ -1,4 +1,3 @@
-// Package api_test содержит тесты для пакета api.
 package api_test
 
 import (
@@ -20,7 +19,7 @@ import (
 	"load-balancer/internal/response"
 	"load-balancer/internal/storage"
 
-	_ "modernc.org/sqlite" // Импорт драйвера
+	_ "modernc.org/sqlite"
 )
 
 // setupTestAPI создает тестовый APIHandler с временной БД.

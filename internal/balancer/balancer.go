@@ -1,4 +1,3 @@
-// Package balancer содержит логику балансировки нагрузки.
 package balancer
 
 import (
@@ -15,12 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	// Импортируем пакет ratelimiter для использования.
 	"load-balancer/internal/config"
 	"load-balancer/internal/response"
 )
 
-// Limiter определяет интерфейс для Rate Limiter, необходимый балансировщику.
 type Limiter interface {
 	Allow(clientID string) bool
 	GetClientID(r *http.Request) string
@@ -30,7 +27,6 @@ type Limiter interface {
 var ErrNoHealthyBackends = errors.New("нет доступных бэкендов")
 
 // Backend представляет один бэкенд-сервер.
-// Содержит URL и статус работоспособности.
 type Backend struct {
 	URL   *url.URL
 	Alive bool         // Флаг, указывающий, доступен ли бэкенд.

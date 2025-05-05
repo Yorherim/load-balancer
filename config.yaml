@@ -16,7 +16,7 @@ rate_limiter:
   default_capacity: 100 # Емкость корзины (максимум токенов) по умолчанию для каждого IP
 
   # Тип хранилища: "memory" или "sqlite"
-  store_type: sqlite
+  # store_type: memory
   database_path: ./rate_limits.db
 
   # Имя HTTP-заголовка для идентификации клиента (например, X-Client-ID, X-Api-Key).

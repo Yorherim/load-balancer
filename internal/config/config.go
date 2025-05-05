@@ -1,4 +1,3 @@
-// Package config отвечает за загрузку и предоставление конфигурации приложения.
 package config
 
 import (
@@ -12,20 +11,19 @@ import (
 )
 
 // ClientRateConfig содержит индивидуальные настройки скорости и емкости лимита для клиента.
-// Переименовано из ClientLimit для ясности, т.к. полное состояние включает токены и lastRefill.
 type ClientRateConfig struct {
-	Rate     float64 `yaml:"rate"`     // Индивидуальная скорость пополнения.
-	Capacity float64 `yaml:"capacity"` // Индивидуальная емкость корзины.
+	Rate     float64 `yaml:"rate"`     // скорость пополнения
+	Capacity float64 `yaml:"capacity"` // емкость корзины
 }
 
 // RateLimiterConfig содержит настройки для rate limiter'а.
 type RateLimiterConfig struct {
-	Enabled          bool    `yaml:"enabled"`           // Включен ли rate limiter.
-	DefaultRate      float64 `yaml:"default_rate"`      // Токенов в секунду по умолчанию.
-	DefaultCapacity  float64 `yaml:"default_capacity"`  // Емкость корзины по умолчанию.
-	StoreType        string  `yaml:"store_type"`        // Тип хранилища (memory или sqlite)
-	DatabasePath     string  `yaml:"database_path"`     // Путь к файлу SQLite.
-	IdentifierHeader string  `yaml:"identifier_header"` // Имя заголовка для ID клиента (опционально).
+	Enabled         bool    `yaml:"enabled"`          // Включен ли rate limiter.
+	DefaultRate     float64 `yaml:"default_rate"`     // Токенов в секунду по умолчанию.
+	DefaultCapacity float64 `yaml:"default_capacity"` // Емкость корзины по умолчанию.
+	// StoreType        string  `yaml:"store_type"`        // Тип хранилища (memory или sqlite)
+	DatabasePath     string `yaml:"database_path"`     // Путь к файлу SQLite.
+	IdentifierHeader string `yaml:"identifier_header"` // Имя заголовка для ID клиента (опционально).
 }
 
 // HealthCheckConfig содержит настройки для проверок состояния бэкендов.
@@ -34,13 +32,12 @@ type HealthCheckConfig struct {
 	IntervalStr string `yaml:"interval"` // Интервал проверки (строка, например "10s")
 	TimeoutStr  string `yaml:"timeout"`  // Таймаут проверки (строка, например "2s")
 	Path        string `yaml:"path"`     // Путь для проверки
-	// Добавим поля для распарсенных значений Duration
+
 	Interval time.Duration `yaml:"-"`
 	Timeout  time.Duration `yaml:"-"`
 }
 
 // Config определяет структуру конфигурационного файла.
-// Используем теги `yaml:"..."` для связи полей структуры с ключами в YAML файле.
 type Config struct {
 	// Port - порт, на котором будет работать балансировщик.
 	Port string `yaml:"port"`
@@ -54,33 +51,27 @@ type Config struct {
 }
 
 // LoadConfig загружает конфигурацию из указанного файла.
-// Принимает путь к файлу конфигурации.
-// Возвращает указатель на структуру Config и ошибку, если возникла проблема.
 func LoadConfig(configPath string) (*Config, error) {
-	// Создаем переменную для хранения конфигурации.
 	config := &Config{
 		// Устанавливаем значения по умолчанию
-		LoadBalancingAlgorithm: "round_robin", // Алгоритм по умолчанию
+		LoadBalancingAlgorithm: "round_robin",
 		RateLimiter: RateLimiterConfig{
 			Enabled:          false,
 			DefaultRate:      1,
 			DefaultCapacity:  1,
 			DatabasePath:     "./rate_limits.db",
-			IdentifierHeader: "", // По умолчанию заголовок не используется
+			IdentifierHeader: "",
 		},
 		HealthCheck: HealthCheckConfig{
-			Enabled: false, // Health checks по умолчанию выключены
-			// IntervalStr, TimeoutStr, Path будут установлены позже, если enabled
+			Enabled: false,
 		},
 	}
 
-	// Читаем содержимое файла конфигурации.
 	file, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Парсим YAML данные из файла в структуру Config.
 	err = yaml.Unmarshal(file, config)
 	if err != nil {
 		return nil, err
@@ -107,15 +98,16 @@ func LoadConfig(configPath string) (*Config, error) {
 			config.RateLimiter.DatabasePath = "./rate_limits.db" // Устанавливаем дефолт, если не указан
 			println("[Warning] rate_limiter.database_path не указан, используется значение по умолчанию ./rate_limits.db")
 		}
-		// Устанавливаем store_type по умолчанию, если не указан
-		if config.RateLimiter.StoreType == "" {
-			config.RateLimiter.StoreType = "memory" // По умолчанию - в памяти
-		} else if config.RateLimiter.StoreType != "memory" && config.RateLimiter.StoreType != "sqlite" {
-			return nil, fmt.Errorf("неверное значение store_type в rate_limiter: %s (ожидается 'memory' или 'sqlite')", config.RateLimiter.StoreType)
-		}
-		if config.RateLimiter.StoreType == "sqlite" && config.RateLimiter.DatabasePath == "" {
-			return nil, fmt.Errorf("database_path должен быть указан для store_type 'sqlite' в rate_limiter")
-		}
+
+		// // Устанавливаем store_type по умолчанию, если не указан
+		// if config.RateLimiter.StoreType == "" {
+		// 	config.RateLimiter.StoreType = "memory" // По умолчанию - в памяти
+		// } else if config.RateLimiter.StoreType != "memory" && config.RateLimiter.StoreType != "sqlite" {
+		// 	return nil, fmt.Errorf("неверное значение store_type в rate_limiter: %s (ожидается 'memory' или 'sqlite')", config.RateLimiter.StoreType)
+		// }
+		// if config.RateLimiter.StoreType == "sqlite" && config.RateLimiter.DatabasePath == "" {
+		// 	return nil, fmt.Errorf("database_path должен быть указан для store_type 'sqlite' в rate_limiter")
+		// }
 		// Валидация индивидуальных лимитов теперь происходит при чтении из БД.
 	}
 

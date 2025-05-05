@@ -1,4 +1,3 @@
-// Package response содержит вспомогательные функции для формирования HTTP-ответов.
 package response
 
 import (
@@ -8,10 +7,9 @@ import (
 )
 
 // ErrorResponse представляет стандартный формат ответа для ошибок API.
-// Изменено поле Error на Message и добавлено поле Code.
 type ErrorResponse struct {
-	Code    int    `json:"code"`    // HTTP статус код
-	Message string `json:"message"` // Сообщение об ошибке
+	Code    int    `json:"code"`
+	Message string `json:"message"`
 }
 
 // RespondWithError отправляет JSON-ответ с ошибкой.

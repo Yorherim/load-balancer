@@ -1,4 +1,3 @@
-// Package config_test содержит тесты для пакета config.
 package config_test
 
 import (
@@ -10,8 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"load-balancer/internal/config" // Импортируем тестируемый пакет
-	// Для проверки ошибки os.ErrNotExist
+	"load-balancer/internal/config"
 )
 
 // TestLoadConfig_Success проверяет успешную загрузку валидного конфига.
@@ -117,10 +115,10 @@ backend_servers:
 	assert.Zero(t, cfg.HealthCheck.Timeout)
 	assert.Equal(t, "", cfg.HealthCheck.Path)
 	assert.False(t, cfg.RateLimiter.Enabled)
-	assert.Equal(t, 1.0, cfg.RateLimiter.DefaultRate)                 // Актуальный дефолт
-	assert.Equal(t, 1.0, cfg.RateLimiter.DefaultCapacity)             // Актуальный дефолт
-	assert.Equal(t, "", cfg.RateLimiter.IdentifierHeader)             // Актуальный дефолт
-	assert.Equal(t, "./rate_limits.db", cfg.RateLimiter.DatabasePath) // Актуальный дефолт
+	assert.Equal(t, 1.0, cfg.RateLimiter.DefaultRate)
+	assert.Equal(t, 1.0, cfg.RateLimiter.DefaultCapacity)
+	assert.Equal(t, "", cfg.RateLimiter.IdentifierHeader)
+	assert.Equal(t, "./rate_limits.db", cfg.RateLimiter.DatabasePath)
 }
 
 // TestLoadConfig_InvalidDuration проверяет ошибку при невалидном формате времени.
