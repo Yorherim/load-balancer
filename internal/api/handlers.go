@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 
 	"load-balancer/internal/config"
 	"load-balancer/internal/response"
+	"load-balancer/internal/storage"
 )
 
 type ClientLimitStore interface {
@@ -45,9 +47,8 @@ func NewAPIHandler(store ClientLimitStore) *APIHandler {
 }
 
 func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Проверяем, что store доступен.
 	if h.Store == nil {
-		response.RespondWithError(w, http.StatusServiceUnavailable, "Хранилище лимитов недоступно") // Используем response.
+		response.RespondWithError(w, http.StatusServiceUnavailable, "Хранилище лимитов недоступно")
 		return
 	}
 
@@ -65,9 +66,9 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.createClient(w, r)
 		case http.MethodGet:
 			// TODO: Реализовать GET /clients для получения списка всех клиентов?
-			response.RespondWithError(w, http.StatusNotImplemented, "Получение списка всех клиентов не реализовано") // Используем response.
+			response.RespondWithError(w, http.StatusNotImplemented, "Получение списка всех клиентов не реализовано")
 		default:
-			response.RespondWithError(w, http.StatusMethodNotAllowed, fmt.Sprintf("Метод %s не поддерживается для /clients", r.Method)) // Используем response.
+			response.RespondWithError(w, http.StatusMethodNotAllowed, fmt.Sprintf("Метод %s не поддерживается для /clients", r.Method))
 		}
 		return // Завершаем обработку
 	}
@@ -82,7 +83,7 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.deleteClient(w, r, clientID)
 	default:
-		response.RespondWithError(w, http.StatusMethodNotAllowed, fmt.Sprintf("Метод %s не поддерживается для /clients/{id}", r.Method)) // Используем response.
+		response.RespondWithError(w, http.StatusMethodNotAllowed, fmt.Sprintf("Метод %s не поддерживается для /clients/{id}", r.Method))
 	}
 }
 
@@ -112,11 +113,14 @@ func (h *APIHandler) createClient(w http.ResponseWriter, r *http.Request) {
 
 	err := h.Store.CreateClientLimit(req.ClientID, limitConfig)
 	if err != nil {
-		// TODO: сделать более корректную проверку на ошибки
-		if strings.Contains(err.Error(), "уже существует") {
-			response.RespondWithError(w, http.StatusConflict, err.Error())
+		// Используем errors.Is для проверки конкретной ошибки из хранилища
+		if errors.Is(err, storage.ErrClientAlreadyExists) {
+			// Возвращаем осмысленный HTTP статус и сообщение
+			response.RespondWithError(w, http.StatusConflict, fmt.Sprintf("Клиент с ID '%s' уже существует", req.ClientID))
 		} else {
-			response.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка создания лимита в БД: %v", err))
+			// Логируем оригинальную ошибку для отладки
+			log.Printf("[API] Ошибка при создании клиента '%s': %v", req.ClientID, err)
+			response.RespondWithError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера при создании клиента")
 		}
 		return
 	}
@@ -170,7 +174,6 @@ func (h *APIHandler) updateClient(w http.ResponseWriter, r *http.Request, client
 		return
 	}
 
-	// Создаем структуру ClientRateConfig для передачи в Store
 	limitConfig := config.ClientRateConfig{
 		Rate:     req.Rate,
 		Capacity: req.Capacity,
@@ -178,16 +181,16 @@ func (h *APIHandler) updateClient(w http.ResponseWriter, r *http.Request, client
 
 	err := h.Store.UpdateClientLimit(clientID, limitConfig)
 	if err != nil {
-		// TODO: сделать более корректную проверку на ошибки
-		if strings.Contains(err.Error(), "не найден для обновления") {
-			response.RespondWithError(w, http.StatusNotFound, err.Error())
+		// Используем errors.Is для проверки
+		if errors.Is(err, storage.ErrClientNotFound) {
+			response.RespondWithError(w, http.StatusNotFound, fmt.Sprintf("Клиент с ID '%s' не найден для обновления", clientID))
 		} else {
-			response.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка обновления лимита в БД: %v", err))
+			log.Printf("[API] Ошибка при обновлении клиента '%s': %v", clientID, err)
+			response.RespondWithError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера при обновлении клиента")
 		}
 		return
 	}
 
-	// Формируем ответ с обновленными данными (используем ClientLimitResponse)
 	resp := ClientLimitResponse{
 		ClientID: clientID,
 		Rate:     req.Rate,
@@ -200,14 +203,15 @@ func (h *APIHandler) updateClient(w http.ResponseWriter, r *http.Request, client
 func (h *APIHandler) deleteClient(w http.ResponseWriter, r *http.Request, clientID string) {
 	err := h.Store.DeleteClientLimit(clientID)
 	if err != nil {
-		if strings.Contains(err.Error(), "не найден") {
-			response.RespondWithError(w, http.StatusNotFound, err.Error()) // Используем response.
+		// Используем errors.Is для проверки
+		if errors.Is(err, storage.ErrClientNotFound) {
+			response.RespondWithError(w, http.StatusNotFound, fmt.Sprintf("Клиент с ID '%s' не найден для удаления", clientID))
 		} else {
-			response.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Ошибка БД: %v", err)) // Используем response.
+			log.Printf("[API] Ошибка при удалении клиента '%s': %v", clientID, err)
+			response.RespondWithError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера при удалении клиента")
 		}
 		return
 	}
 
-	// Успешное удаление - часто возвращают 204 No Content без тела
 	w.WriteHeader(http.StatusNoContent)
 }

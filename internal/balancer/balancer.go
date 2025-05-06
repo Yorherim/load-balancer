@@ -37,9 +37,9 @@ type Backend struct {
 
 // SetAlive безопасно устанавливает статус работоспособности бэкенда.
 func (b *Backend) SetAlive(alive bool) {
-	b.mux.Lock()         // Блокируем на запись.
-	defer b.mux.Unlock() // Гарантируем разблокировку.
-	// Логируем только при изменении статуса
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
 	if b.Alive != alive {
 		b.Alive = alive
 		status := "недоступен"
@@ -69,13 +69,11 @@ type Balancer struct {
 }
 
 // New создает новый экземпляр Balancer.
-// Теперь принимает интерфейс Limiter.
 func New(backendUrls []string, rl Limiter, hcConfig config.HealthCheckConfig, algorithm string) (*Balancer, error) {
 	if len(backendUrls) == 0 {
 		return nil, fmt.Errorf("не указаны бэкенд-серверы")
 	}
 
-	// Приводим название алгоритма к нижнему регистру для надежности
 	parsedAlgorithm := strings.ToLower(algorithm)
 	if parsedAlgorithm != "round_robin" && parsedAlgorithm != "random" {
 		log.Printf("[Warning] Неизвестный алгоритм балансировки '%s', используется 'round_robin'", algorithm)
@@ -90,7 +88,6 @@ func New(backendUrls []string, rl Limiter, hcConfig config.HealthCheckConfig, al
 
 	// Инициализируем RNG, если выбран Random
 	if b.algorithm == "random" {
-		// Используем новый источник, чтобы избежать проблем с глобальным локом
 		source := rand.NewSource(time.Now().UnixNano())
 		b.rng = rand.New(source)
 		log.Println("[Balancer] Инициализирован генератор случайных чисел для Random алгоритма.")
@@ -98,14 +95,9 @@ func New(backendUrls []string, rl Limiter, hcConfig config.HealthCheckConfig, al
 
 	backends := make([]*Backend, 0, len(backendUrls))
 
-	// Убираем отладочные логи
-	// log.Printf("[DEBUG] Начинаем парсинг бэкенд URL...")
 	for i, rawURL := range backendUrls {
-		// log.Printf("[DEBUG] Парсинг URL #%d: '%s'", i, rawURL)
 		parsedURL, err := url.Parse(rawURL)
-		// log.Printf("[DEBUG] Результат парсинга URL #%d: err = %v, parsedURL = %v", i, err, parsedURL)
 		if err != nil {
-			// log.Printf("[DEBUG] Обнаружена ошибка парсинга URL #%d, возвращаем ошибку.", i)
 			return nil, fmt.Errorf("ошибка парсинга URL бэкенда #%d ('%s'): %w", i, rawURL, err)
 		}
 
@@ -122,15 +114,10 @@ func New(backendUrls []string, rl Limiter, hcConfig config.HealthCheckConfig, al
 		proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
 			log.Printf("--- Custom ErrorHandler ENTERED for %s ---", req.URL.Path) // Добавим лог входа
 
-			// Используем GetClientID из переданного Rate Limiter
-			// Проверяем на nil на всякий случай
-			clientID := "unknown"
-			// Используем интерфейс Limiter, проверка на nil не нужна, если интерфейс не nil
-			// if rl != nil { // Больше не нужно, если rl интерфейс
-			clientID = rl.GetClientID(req)
-			// }
+			clientID := rl.GetClientID(req)
 			log.Printf("[Balancer] Ошибка проксирования на Бэкенд #%d (%s) для запроса от '%s': %v. Помечаем как нерабочий.",
 				backendIndex, parsedURL.String(), clientID, err)
+
 			// Находим нужный бэкенд по индексу (теперь он есть в замыкании)
 			// Нужна проверка на выход за границы на случай гонки состояний, хотя маловероятно
 			if backendIndex < len(b.backends) {
@@ -138,9 +125,7 @@ func New(backendUrls []string, rl Limiter, hcConfig config.HealthCheckConfig, al
 			} else {
 				log.Printf("[Warning] ErrorHandler: Не удалось найти бэкенд с индексом %d для установки Alive=false", backendIndex)
 			}
-			// Используем response.RespondWithError для отправки JSON-ответа
-			// Сообщение ошибки можно сделать более общим для пользователя
-			// Используем уникальное сообщение
+
 			response.RespondWithError(rw, http.StatusBadGateway, "Bad Gateway from Custom Handler")
 			log.Printf("--- Custom ErrorHandler EXITED for %s ---", req.URL.Path) // Добавим лог выхода
 		}
@@ -150,11 +135,10 @@ func New(backendUrls []string, rl Limiter, hcConfig config.HealthCheckConfig, al
 			Alive:        true,
 			ReverseProxy: proxy,
 		}
-		// Добавляем во временный слайс
+
 		backends = append(backends, backend)
 		log.Printf("[Config] Бэкенд #%d добавлен: %s", i, backend.URL)
 	}
-	// log.Printf("[DEBUG] Парсинг бэкенд URL завершен успешно.")
 
 	// Только после успешного парсинга всех URL присваиваем слайс балансировщику
 	b.backends = backends
@@ -227,12 +211,7 @@ func (b *Balancer) getRandomHealthyBackend() (*Backend, int, error) {
 // ServeHTTP обрабатывает входящие запросы.
 func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Логируем входящий запрос
-	clientID := "unknown"
-	// Используем интерфейс Limiter
-	// if b.rateLimiter != nil { // Проверка больше не нужна, интерфейс будет либо nil, либо реализацией
-	// Получаем идентификатор клиента ДО проверки лимита
-	clientID = b.rateLimiter.GetClientID(r)
-	// }
+	clientID := b.rateLimiter.GetClientID(r)
 	log.Printf("[Request] Получен запрос: Метод=%s Путь=%s От=%s (%s)", r.Method, r.URL.Path, r.RemoteAddr, clientID)
 
 	// 1. Rate Limiting (если включен)
@@ -254,14 +233,13 @@ func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "random":
 		targetBackend, backendIndex, err = b.getRandomHealthyBackend()
 	case "round_robin":
-		fallthrough // Используем round_robin как дефолтный
+		fallthrough
 	default:
 		targetBackend, backendIndex, err = b.getRoundRobinHealthyBackend()
 	}
 
 	if err != nil {
 		log.Printf("[Balancer] Ошибка выбора бэкенда (%s): %v. Невозможно обработать запрос %s %s от '%s'.", b.algorithm, err, r.Method, r.URL.Path, clientID)
-		// Используем response.RespondWithError для 503
 		response.RespondWithError(w, http.StatusServiceUnavailable, "All backend servers are unavailable")
 		return
 	}
@@ -276,7 +254,6 @@ func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Host = targetUrl.Host
 		r.URL.Path, r.URL.RawPath = r.URL.Path, r.URL.RawPath
 		if _, ok := r.Header["User-Agent"]; !ok {
-			// explicitly disable User-Agent so it's not set to default value
 			r.Header.Set("User-Agent", "")
 		}
 		// Устанавливаем Host и X-Forwarded-*
@@ -286,10 +263,8 @@ func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			r.Header.Set("X-Forwarded-Host", r.Host)
 		}
-		// Очищаем X-Forwarded-For, httputil добавит IP балансировщика.
-		r.Header.Del("X-Forwarded-For")
-		// TODO: Аккуратно добавить IP клиента в X-Forwarded-For, если нужно.
 
+		r.Header.Del("X-Forwarded-For")
 		log.Printf("[Balancer] Перенаправление запроса от '%s' -> Бэкенд #%d (%s)", clientID, backendIndex, targetUrl)
 	}
 
@@ -303,21 +278,17 @@ func (b *Balancer) startHealthChecks() {
 	log.Printf("[HealthCheck] Запуск проверок состояния: Интервал=%v, Таймаут=%v, Путь=%s",
 		b.healthCheckConfig.Interval, b.healthCheckConfig.Timeout, b.healthCheckConfig.Path)
 
-	// Создаем HTTP клиент с таймаутом
 	client := &http.Client{
 		Timeout: b.healthCheckConfig.Timeout,
-		// Можно настроить Transport для переиспользования соединений и т.д.
 		Transport: &http.Transport{
-			MaxIdleConnsPerHost: 5, // Пример настройки
+			MaxIdleConnsPerHost: 5,
 			IdleConnTimeout:     30 * time.Second,
 		},
 	}
 
-	// Создаем тикер
 	ticker := time.NewTicker(b.healthCheckConfig.Interval)
-	defer ticker.Stop() // Останавливаем тикер при выходе из функции
+	defer ticker.Stop()
 
-	// Выполняем первую проверку немедленно
 	b.performChecks(client)
 
 	// Запускаем цикл проверок
@@ -327,7 +298,7 @@ func (b *Balancer) startHealthChecks() {
 			b.performChecks(client)
 		case <-b.healthCheckStopChan:
 			log.Println("[HealthCheck] Получен сигнал остановки проверок.")
-			return // Выходим из горутины
+			return
 		}
 	}
 }
@@ -335,22 +306,18 @@ func (b *Balancer) startHealthChecks() {
 // performChecks запускает проверку для каждого бэкенда в отдельной горутине.
 func (b *Balancer) performChecks(client *http.Client) {
 	log.Println("[HealthCheck] Выполнение цикла проверок...")
-	var wg sync.WaitGroup // Используем WaitGroup для ожидания завершения всех горутин проверки (опционально)
+
 	for _, backend := range b.backends {
-		wg.Add(1)
 		go func(be *Backend) {
-			defer wg.Done()
 			b.checkBackendHealth(be, client)
-		}(backend) // Передаем копию указателя в горутину
+		}(backend)
 	}
-	// wg.Wait() // Можно раскомментировать, если нужно дождаться завершения всех проверок перед следующим тиком
 }
 
 // checkBackendHealth выполняет проверку состояния одного бэкенда.
 func (b *Balancer) checkBackendHealth(backend *Backend, client *http.Client) {
-	checkURL := backend.URL.JoinPath(b.healthCheckConfig.Path).String() // Формируем URL для проверки
-	// Используем context с таймаутом, хотя клиент уже имеет таймаут.
-	// Это полезно, если внутри client.Get есть другие потенциально долгие операции.
+	checkURL := backend.URL.JoinPath(b.healthCheckConfig.Path).String()
+
 	ctx, cancel := context.WithTimeout(context.Background(), b.healthCheckConfig.Timeout)
 	defer cancel()
 

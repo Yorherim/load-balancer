@@ -18,12 +18,11 @@ type ClientRateConfig struct {
 
 // RateLimiterConfig содержит настройки для rate limiter'а.
 type RateLimiterConfig struct {
-	Enabled         bool    `yaml:"enabled"`          // Включен ли rate limiter.
-	DefaultRate     float64 `yaml:"default_rate"`     // Токенов в секунду по умолчанию.
-	DefaultCapacity float64 `yaml:"default_capacity"` // Емкость корзины по умолчанию.
-	// StoreType        string  `yaml:"store_type"`        // Тип хранилища (memory или sqlite)
-	DatabasePath     string `yaml:"database_path"`     // Путь к файлу SQLite.
-	IdentifierHeader string `yaml:"identifier_header"` // Имя заголовка для ID клиента (опционально).
+	Enabled          bool    `yaml:"enabled"`           // Включен ли rate limiter.
+	DefaultRate      float64 `yaml:"default_rate"`      // Токенов в секунду по умолчанию.
+	DefaultCapacity  float64 `yaml:"default_capacity"`  // Емкость корзины по умолчанию.
+	DatabasePath     string  `yaml:"database_path"`     // Путь к файлу SQLite.
+	IdentifierHeader string  `yaml:"identifier_header"` // Имя заголовка для ID клиента (опционально).
 }
 
 // HealthCheckConfig содержит настройки для проверок состояния бэкендов.
@@ -99,16 +98,6 @@ func LoadConfig(configPath string) (*Config, error) {
 			println("[Warning] rate_limiter.database_path не указан, используется значение по умолчанию ./rate_limits.db")
 		}
 
-		// // Устанавливаем store_type по умолчанию, если не указан
-		// if config.RateLimiter.StoreType == "" {
-		// 	config.RateLimiter.StoreType = "memory" // По умолчанию - в памяти
-		// } else if config.RateLimiter.StoreType != "memory" && config.RateLimiter.StoreType != "sqlite" {
-		// 	return nil, fmt.Errorf("неверное значение store_type в rate_limiter: %s (ожидается 'memory' или 'sqlite')", config.RateLimiter.StoreType)
-		// }
-		// if config.RateLimiter.StoreType == "sqlite" && config.RateLimiter.DatabasePath == "" {
-		// 	return nil, fmt.Errorf("database_path должен быть указан для store_type 'sqlite' в rate_limiter")
-		// }
-		// Валидация индивидуальных лимитов теперь происходит при чтении из БД.
 	}
 
 	// Парсим интервал и таймаут HealthCheck, если включено

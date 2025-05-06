@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"load-balancer/internal/config"
@@ -20,16 +19,12 @@ type ClientState struct {
 }
 
 // DB представляет обертку над соединением с базой данных.
-// Это позволяет легко подменять реализацию хранилища в будущем.
 type DB struct {
 	Conn *sql.DB
-	Mu   sync.Mutex
 }
 
 // NewSQLiteDB инициализирует соединение с базой данных SQLite и создает таблицу, если она не существует.
 func NewSQLiteDB(dataSourceName string) (*DB, error) {
-	// Открываем (или создаем) файл базы данных, используя драйвер "sqlite".
-	// Имя драйвера для modernc.org/sqlite - просто "sqlite".
 	conn, err := sql.Open("sqlite", dataSourceName)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка открытия БД SQLite '%s': %w", dataSourceName, err)
@@ -42,14 +37,13 @@ func NewSQLiteDB(dataSourceName string) (*DB, error) {
 	}
 
 	// Создаем таблицу для хранения лимитов, если она еще не существует.
-	// Добавляем колонки для хранения текущего состояния.
 	query := `
 	CREATE TABLE IF NOT EXISTS client_rate_limits (
 		client_id TEXT PRIMARY KEY,
 		rate REAL NOT NULL,
 		capacity REAL NOT NULL,
-		current_tokens REAL NOT NULL DEFAULT 0.0,  -- Текущее количество токенов
-		last_refill TEXT NOT NULL DEFAULT ''     -- Время последнего пополнения (RFC3339Nano)
+		current_tokens REAL NOT NULL DEFAULT 0.0,  
+		last_refill TEXT NOT NULL DEFAULT ''     
 	);
 	`
 	_, err = conn.Exec(query)
@@ -80,17 +74,16 @@ func (db *DB) GetClientLimitAndState(clientID string) (rate, capacity, tokens fl
 	errScan := row.Scan(&rateDB, &capacityDB, &tokensDB, &lastRefillStr)
 	if errScan != nil {
 		if errScan == sql.ErrNoRows {
-			return 0, 0, 0, time.Time{}, false, nil // Не найдено
+			return 0, 0, 0, time.Time{}, false, nil
 		}
 		log.Printf("[Storage] Ошибка получения состояния для клиента '%s': %v", clientID, errScan)
 		return 0, 0, 0, time.Time{}, false, fmt.Errorf("ошибка запроса состояния клиента '%s': %w", clientID, errScan)
 	}
 
-	// Парсим время
 	lastRefillTime, errParse := time.Parse(time.RFC3339Nano, lastRefillStr)
-	if errParse != nil && lastRefillStr != "" { // Игнорируем ошибку парсинга для пустой строки (дефолт)
+	if errParse != nil && lastRefillStr != "" {
 		log.Printf("[Storage] Ошибка парсинга last_refill ('%s') для клиента '%s': %v. Используется нулевое время.", lastRefillStr, clientID, errParse)
-		lastRefillTime = time.Time{} // Используем нулевое время при ошибке парсинга
+		lastRefillTime = time.Time{}
 	}
 
 	return rateDB, capacityDB, tokensDB, lastRefillTime, true, nil
@@ -139,9 +132,6 @@ func (db *DB) GetClientSavedState(clientID string) (tokens float64, lastRefill t
 
 // CreateClientLimit добавляет нового клиента и его лимиты в БД, включая начальное состояние.
 func (db *DB) CreateClientLimit(clientID string, limit config.ClientRateConfig) error {
-	db.Mu.Lock()
-	defer db.Mu.Unlock()
-
 	// Устанавливаем начальное состояние: токены = емкость, время = сейчас
 	initialTokens := limit.Capacity
 	initialTimeStr := time.Now().Format(time.RFC3339Nano)
@@ -149,8 +139,8 @@ func (db *DB) CreateClientLimit(clientID string, limit config.ClientRateConfig) 
 	query := `INSERT INTO client_rate_limits (client_id, rate, capacity, current_tokens, last_refill) VALUES (?, ?, ?, ?, ?)`
 	_, err := db.Conn.Exec(query, clientID, limit.Rate, limit.Capacity, initialTokens, initialTimeStr)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return fmt.Errorf("клиент с ID '%s' уже существует", clientID)
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "constraint failed: client_rate_limits.client_id") {
+			return fmt.Errorf("ошибка добавления клиента '%s': %w", clientID, ErrClientAlreadyExists)
 		}
 		return fmt.Errorf("ошибка добавления лимита для '%s': %w", clientID, err)
 	}
@@ -161,9 +151,6 @@ func (db *DB) CreateClientLimit(clientID string, limit config.ClientRateConfig) 
 // UpdateClientLimit обновляет настройки лимита (rate, capacity) для существующего клиента.
 // Не меняет текущее состояние токенов и время.
 func (db *DB) UpdateClientLimit(clientID string, limit config.ClientRateConfig) error {
-	db.Mu.Lock()
-	defer db.Mu.Unlock()
-
 	query := `UPDATE client_rate_limits SET rate = ?, capacity = ? WHERE client_id = ?`
 	res, err := db.Conn.Exec(query, limit.Rate, limit.Capacity, clientID)
 	if err != nil {
@@ -175,7 +162,7 @@ func (db *DB) UpdateClientLimit(clientID string, limit config.ClientRateConfig) 
 		return fmt.Errorf("ошибка получения количества обновленных строк для '%s': %w", clientID, err)
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("клиент с ID '%s' не найден для обновления", clientID)
+		return fmt.Errorf("ошибка обновления клиента '%s': %w", clientID, ErrClientNotFound)
 	}
 
 	log.Printf("[Storage] Обновлен лимит (rate/capacity) для клиента '%s': Rate=%.2f, Capacity=%.2f", clientID, limit.Rate, limit.Capacity)
@@ -185,9 +172,6 @@ func (db *DB) UpdateClientLimit(clientID string, limit config.ClientRateConfig) 
 // DeleteClientLimit удаляет лимиты для указанного клиента из БД.
 // Возвращает ошибку, если клиент не найден или произошла ошибка БД.
 func (db *DB) DeleteClientLimit(clientID string) error {
-	db.Mu.Lock()
-	defer db.Mu.Unlock()
-
 	query := `DELETE FROM client_rate_limits WHERE client_id = ?`
 	res, err := db.Conn.Exec(query, clientID)
 	if err != nil {
@@ -199,7 +183,7 @@ func (db *DB) DeleteClientLimit(clientID string) error {
 		return fmt.Errorf("ошибка получения количества удаленных строк для '%s': %w", clientID, err)
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("клиент с ID '%s' не найден для удаления", clientID)
+		return fmt.Errorf("ошибка удаления клиента '%s': %w", clientID, ErrClientNotFound)
 	}
 
 	log.Printf("[Storage] Удален лимит для клиента '%s'", clientID)
@@ -211,8 +195,6 @@ func (db *DB) BatchUpdateClientState(states map[string]ClientState) error {
 	if len(states) == 0 {
 		return nil // Нечего обновлять
 	}
-	db.Mu.Lock()
-	defer db.Mu.Unlock()
 
 	tx, err := db.Conn.Begin()
 	if err != nil {

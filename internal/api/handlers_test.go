@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,7 +17,6 @@ import (
 
 	"load-balancer/internal/api"
 	"load-balancer/internal/config"
-	"load-balancer/internal/response"
 	"load-balancer/internal/storage"
 
 	_ "modernc.org/sqlite"
@@ -45,14 +45,12 @@ func TestAPI_CRUD_Operations(t *testing.T) {
 	apiHandler, cleanup := setupTestAPI(t)
 	defer cleanup()
 
-	// Создаем тестовый сервер, ИМИТИРУЯ StripPrefix из main.go
 	server := httptest.NewServer(http.StripPrefix("/clients", apiHandler))
 	defer server.Close()
 
 	clientID := "api-client-1"
 	initialLimit := config.ClientRateConfig{Rate: 10, Capacity: 100} // Используем ClientRateConfig
 
-	// 1. Create Client (используем плоский JSON)
 	createReqBody, _ := json.Marshal(map[string]interface{}{
 		"client_id":    clientID,
 		"rate_per_sec": initialLimit.Rate,
@@ -60,7 +58,7 @@ func TestAPI_CRUD_Operations(t *testing.T) {
 	})
 	resp, err := http.Post(server.URL+"/clients/", "application/json", bytes.NewBuffer(createReqBody))
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusCreated, resp.StatusCode, "Create status code")
+	require.Equal(t, http.StatusCreated, resp.StatusCode, "Create status code")
 	// Проверяем тело ответа (ожидаем плоскую структуру)
 	var createResp api.ClientLimitResponse
 	err = json.NewDecoder(resp.Body).Decode(&createResp)
@@ -70,21 +68,20 @@ func TestAPI_CRUD_Operations(t *testing.T) {
 	assert.Equal(t, initialLimit.Rate, createResp.Rate)         // Проверяем поле Rate
 	assert.Equal(t, initialLimit.Capacity, createResp.Capacity) // Проверяем поле Capacity
 
-	// Попытка создать дубликат
+	// 2. Попытка создать дубликат
 	resp, err = http.Post(server.URL+"/clients/", "application/json", bytes.NewBuffer(createReqBody))
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusConflict, resp.StatusCode, "Create duplicate status code")
-	// Проверяем тело ошибки
-	var errResp response.ErrorResponse
-	err = json.NewDecoder(resp.Body).Decode(&errResp)
+	require.Equal(t, http.StatusConflict, resp.StatusCode, "Create duplicate status code")
+	// Проверяем новое сообщение об ошибке
+	bodyBytes, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	resp.Body.Close()
-	assert.Contains(t, errResp.Message, "уже существует")
+	resp.Body.Close() // Не забываем закрыть тело
+	require.Contains(t, string(bodyBytes), fmt.Sprintf("Клиент с ID '%s' уже существует", clientID), "Create duplicate error message")
 
-	// 2. Get Client
+	// 3. Get Client
 	resp, err = http.Get(server.URL + "/clients/" + clientID)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Get status code")
+	require.Equal(t, http.StatusOK, resp.StatusCode, "Get status code")
 	var getResp api.ClientLimitResponse
 	err = json.NewDecoder(resp.Body).Decode(&getResp)
 	require.NoError(t, err)
@@ -99,7 +96,7 @@ func TestAPI_CRUD_Operations(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "Get non-existent status code")
 	resp.Body.Close()
 
-	// 3. Update Client (используем плоский JSON)
+	// 4. Update Client (используем плоский JSON)
 	updatedLimit := config.ClientRateConfig{Rate: 20, Capacity: 200}
 	updateReqBody, _ := json.Marshal(map[string]interface{}{
 		// "client_id": clientID, // client_id можно не указывать в теле PUT
@@ -110,7 +107,7 @@ func TestAPI_CRUD_Operations(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Update status code")
+	require.Equal(t, http.StatusOK, resp.StatusCode, "Update status code")
 	// Проверяем тело ответа (ожидаем плоскую структуру)
 	var updateResp api.ClientLimitResponse
 	err = json.NewDecoder(resp.Body).Decode(&updateResp)
@@ -120,10 +117,10 @@ func TestAPI_CRUD_Operations(t *testing.T) {
 	assert.Equal(t, updatedLimit.Rate, updateResp.Rate)         // Проверяем поле Rate
 	assert.Equal(t, updatedLimit.Capacity, updateResp.Capacity) // Проверяем поле Capacity
 
-	// Проверяем, что GET возвращает обновленные данные
+	// 7. Получить обновленный лимит (проверка)
 	resp, err = http.Get(server.URL + "/clients/" + clientID)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "Get after update status code")
+	require.Equal(t, http.StatusOK, resp.StatusCode, "Get after update status code")
 	err = json.NewDecoder(resp.Body).Decode(&getResp)
 	require.NoError(t, err)
 	resp.Body.Close()
@@ -218,17 +215,6 @@ func TestAPI_BadRequest(t *testing.T) {
 	resp.Body.Close()
 }
 
-// logErrorHandler - обертка для логгирования ошибок сервера во время тестов
-func logErrorHandler(t *testing.T, handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		lw := &loggingResponseWriter{ResponseWriter: w}
-		handler.ServeHTTP(lw, r)
-		if lw.statusCode >= 400 {
-			t.Logf("[Server Error] %s %s -> %d", r.Method, r.URL.Path, lw.statusCode)
-		}
-	})
-}
-
 type loggingResponseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -281,8 +267,6 @@ func (m *mockStore) DeleteClientLimit(clientID string) error {
 	return nil
 }
 
-// --- Новые тесты для покрытия --- //
-
 // TestAPIHandler_NewNilStore проверяет создание хендлера с nil store
 func TestAPIHandler_NewNilStore(t *testing.T) {
 	// Ожидаем, что не будет паники и вернется хендлер
@@ -318,9 +302,9 @@ func TestAPIHandler_ServeHTTP_MethodNotAllowed(t *testing.T) {
 		method string
 		target string
 	}{
-		{http.MethodDelete, "/clients"},       // Неверный метод для коллекции
-		{http.MethodPut, "/clients"},          // Неверный метод для коллекции
-		{http.MethodPost, "/clients/some-id"}, // Неверный метод для ресурса
+		{http.MethodDelete, "/clients"},
+		{http.MethodPut, "/clients"},
+		{http.MethodPost, "/clients/some-id"},
 	}
 
 	for _, tc := range tests {
@@ -328,7 +312,6 @@ func TestAPIHandler_ServeHTTP_MethodNotAllowed(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.target, nil)
 			rr := httptest.NewRecorder()
 
-			// Для обработки пути используем ServeMux, как в main.go
 			mux := http.NewServeMux()
 			mux.Handle("/clients/", http.StripPrefix("/clients", h))
 			mux.Handle("/clients", http.StripPrefix("/clients", h))
@@ -346,7 +329,6 @@ func TestAPIHandler_ServeHTTP_GetClientsNotImplemented(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/clients", nil)
 	rr := httptest.NewRecorder()
 
-	// Используем ServeMux, как в main.go
 	mux := http.NewServeMux()
 	mux.Handle("/clients/", http.StripPrefix("/clients", h))
 	mux.Handle("/clients", http.StripPrefix("/clients", h))
@@ -365,20 +347,18 @@ func TestAPIHandler_CreateClient_StoreError(t *testing.T) {
 		},
 	}
 	h := api.NewAPIHandler(store)
-	// Используем правильный плоский формат JSON
 	body := `{"client_id":"test-client","rate_per_sec":10,"capacity":100}`
-	// URL должен включать префикс, который будет удален StripPrefix
 	req := httptest.NewRequest(http.MethodPost, "/clients", strings.NewReader(body))
 	rr := httptest.NewRecorder()
 
-	// Используем ServeMux и StripPrefix для корректной маршрутизации
 	mux := http.NewServeMux()
 	mux.Handle("/clients/", http.StripPrefix("/clients", h))
 	mux.Handle("/clients", http.StripPrefix("/clients", h))
 	mux.ServeHTTP(rr, req)
 
 	assertStatusCode(t, rr, http.StatusInternalServerError)
-	assertErrorResponseContains(t, rr, http.StatusInternalServerError, "Ошибка создания лимита в БД")
+	// Проверяем новое общее сообщение об ошибке
+	assertErrorResponseContains(t, rr, http.StatusInternalServerError, "Внутренняя ошибка сервера при создании клиента")
 }
 
 // TestAPIHandler_GetClient_StoreError проверяет 500 при ошибке получения из store
@@ -407,26 +387,25 @@ func TestAPIHandler_UpdateClient_StoreError(t *testing.T) {
 	expectedError := errors.New("failed to update")
 	store := &mockStore{
 		updateClientLimitFunc: func(clientID string, limit config.ClientRateConfig) error {
-			return expectedError // Возвращаем НЕ ошибку "не найден"
+			return expectedError
 		},
 	}
 	h := api.NewAPIHandler(store)
-	// Используем правильный плоский формат JSON
-	body := `{"rate_per_sec":20,"capacity":200}` // client_id можно опустить
+	body := `{"rate_per_sec":20,"capacity":200}`
 	req := httptest.NewRequest(http.MethodPut, "/clients/test-client", strings.NewReader(body))
 	rr := httptest.NewRecorder()
 
-	// Используем ServeMux
 	mux := http.NewServeMux()
 	mux.Handle("/clients/", http.StripPrefix("/clients", h))
 	mux.ServeHTTP(rr, req)
 
 	assertStatusCode(t, rr, http.StatusInternalServerError)
-	assertErrorResponseContains(t, rr, http.StatusInternalServerError, "Ошибка обновления лимита в БД")
+	// Проверяем новое общее сообщение об ошибке
+	assertErrorResponseContains(t, rr, http.StatusInternalServerError, "Внутренняя ошибка сервера при обновлении клиента")
 }
 
-// TestAPIHandler_UpdateClient_BadJSON проверяет 400 при некорректном JSON
-func TestAPIHandler_UpdateClient_BadJSON(t *testing.T) {
+// TestAPIHandler_UpdateClient_BadRequest проверяет 400 при некорректном запросе обновления
+func TestAPIHandler_UpdateClient_BadRequest(t *testing.T) {
 	store := &mockStore{} // Store не будет вызван
 	h := api.NewAPIHandler(store)
 	badBody := `{"client_id":"test-client","rate_per_sec":10,"capacity":100` // Незакрытая скобка
@@ -454,13 +433,13 @@ func TestAPIHandler_DeleteClient_StoreError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/clients/some-id", nil)
 	rr := httptest.NewRecorder()
 
-	// Используем ServeMux
 	mux := http.NewServeMux()
 	mux.Handle("/clients/", http.StripPrefix("/clients", h))
 	mux.ServeHTTP(rr, req)
 
 	assertStatusCode(t, rr, http.StatusInternalServerError)
-	assertErrorResponseContains(t, rr, http.StatusInternalServerError, "Ошибка БД")
+	// Проверяем новое общее сообщение об ошибке
+	assertErrorResponseContains(t, rr, http.StatusInternalServerError, "Внутренняя ошибка сервера при удалении клиента")
 }
 
 // --- Вспомогательные функции для ассертов (если их еще нет) ---
@@ -483,11 +462,10 @@ func assertErrorResponseContains(t *testing.T, rr *httptest.ResponseRecorder, ex
 	t.Helper()
 	var respBody errorResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &respBody); err != nil {
-		// Может быть не JSON ответ, если ошибка произошла до RespondWithError
 		if !strings.Contains(rr.Body.String(), expectedSubstring) {
 			t.Errorf("handler response body does not contain expected error substring: got %q want substring %q", rr.Body.String(), expectedSubstring)
 		}
-		return // Выходим, если не JSON
+		return
 	}
 	if respBody.Code != expectedCode {
 		t.Errorf("handler returned wrong error code: got %d want %d", respBody.Code, expectedCode)

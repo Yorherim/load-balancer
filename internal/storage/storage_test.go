@@ -56,7 +56,7 @@ func TestDBCreateGetDeleteClientLimit(t *testing.T) {
 	// Попытка создать дубликат
 	err = db.CreateClientLimit(clientID, limit)
 	require.Error(t, err, "Должна быть ошибка при создании дубликата")
-	assert.Contains(t, err.Error(), "уже существует", "Текст ошибки дубликата неверен")
+	require.ErrorIs(t, err, storage.ErrClientAlreadyExists, "Тип ошибки дубликата неверен")
 
 	// 2. Get (используем новую функцию для получения всего)
 	rate, capacity, tokens, lastRefill, found, err := db.GetClientLimitAndState(clientID)
@@ -86,7 +86,7 @@ func TestDBCreateGetDeleteClientLimit(t *testing.T) {
 	// Попытка обновить несуществующего
 	err = db.UpdateClientLimit("non-existent", updatedLimit)
 	require.Error(t, err, "Должна быть ошибка при обновлении несуществующего")
-	assert.Contains(t, err.Error(), "не найден для обновления", "Текст ошибки обновления неверен")
+	require.ErrorIs(t, err, storage.ErrClientNotFound, "Тип ошибки обновления неверен")
 
 	// 4. Delete
 	err = db.DeleteClientLimit(clientID)
@@ -99,8 +99,8 @@ func TestDBCreateGetDeleteClientLimit(t *testing.T) {
 
 	// Попытка удалить несуществующего
 	err = db.DeleteClientLimit("non-existent")
-	require.Error(t, err, "Должна быть ошибка при удалении несуществующего")
-	assert.Contains(t, err.Error(), "не найден для удаления", "Текст ошибки удаления неверен")
+	require.Error(t, err, "Должна быть ошибка при удалении несуществующего клиента")
+	require.ErrorIs(t, err, storage.ErrClientNotFound, "Тип ошибки удаления неверен")
 }
 
 // TestGetClientLimitConfig проверяет получение только rate и capacity.
